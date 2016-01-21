@@ -1,4 +1,4 @@
-# This make file supports Windows build
+# This make file supports Windows build of Jemalloc
 #
 # Prerequisites:
 #     You must have Visual Studio 2013 Update 4 installed or Visual Studio 2015 Update 1.
@@ -22,12 +22,19 @@
 # Currently this file only enables building on Windows and not Cygwin or MSYS
 cmake_minimum_required (VERSION 2.8.12 FATAL_ERROR)
 
+# if (POLICY CMP0042)
+  # cmake_policy (SET CMP0042 NEW)
+# endif ()
+
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/Utilities.cmake)
 include (CheckTypeSize)
 
-# Versioning from GIT, defaults
+##################################################################
+# Versioning from GIT
+# Defaults
 set (jemalloc_version "0.0.0-0-g0000000000000000000000000000000000000000")
 set (jemalloc_version_major 0)
 set (jemalloc_version_minor 0)
@@ -36,84 +43,70 @@ set (jemalloc_version_nrev 0)
 set (jemalloc_version_gid "0")
 
 find_package(Git)
+GetAndParseVersion()
 
-if (GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-    execute_process(COMMAND $ENV{COMSPEC} /C 
-      ${GIT_EXECUTABLE} -C ${CMAKE_CURRENT_SOURCE_DIR} describe --long --abbrev=40 HEAD OUTPUT_VARIABLE jemalloc_version)
-    
-    # Figure out version components    
-    string (REPLACE "\n" "" jemalloc_version  ${jemalloc_version})
-    message(STATUS "Version is ${jemalloc_version}")
-
-    # replace in this order to get a valid cmake list
-    string (REPLACE "-g" "-" T_VERSION ${jemalloc_version})
-    string (REPLACE "-" "." T_VERSION  ${T_VERSION})
-    string (REPLACE "." ";" T_VERSION  ${T_VERSION})
-    message(STATUS "T_VERSION is ${T_VERSION}")
-    
-    list(LENGTH T_VERSION L_LEN)
-    message(STATUS "T_VERSION len is ${L_LEN}")
-    
-    if(${L_LEN} GREATER 0)
-      list(GET T_VERSION 0 jemalloc_version_major)
-      message(STATUS "Major: ${jemalloc_version_major}")
-    endif()
-
-    if(${L_LEN} GREATER 1)
-      list(GET T_VERSION 1 jemalloc_version_minor)
-      message(STATUS "Minor: ${jemalloc_version_minor}")
-    endif()
-
-    if(${L_LEN} GREATER 2)
-      list(GET T_VERSION 2 jemalloc_version_bugfix)
-      message(STATUS "jemalloc_version_bugfix: ${jemalloc_version_bugfix}")
-    endif()
-
-    if(${L_LEN} GREATER 3)
-      list(GET T_VERSION 3 jemalloc_version_nrev)
-      message(STATUS "jemalloc_version_nrev: ${jemalloc_version_nrev}")
-    endif()
-
-    if(${L_LEN} GREATER 4)
-      list(GET T_VERSION 4 jemalloc_version_gid)
-      message(STATUS "jemalloc_version_gid: ${jemalloc_version_gid}")
-    endif()
-endif()
+set(PUBLIC_SYM
+  malloc_conf
+  malloc_message
+  malloc
+  calloc
+  posix_memalign
+  aligned_alloc
+  realloc
+  free
+  mallocx
+  rallocx
+  xallocx
+  sallocx
+  dallocx
+  sdallocx
+  nallocx
+  mallctl
+  mallctlnametomib
+  mallctlbymib
+  malloc_stats_print
+  malloc_usable_size
+)
 
 # @je_@ prefix driven by a command line
 # default is on
 set(JEMALLOC_PRIVATE_NAMESPACE je_)
 set(JEMALLOC_PREFIX je_)
+set(JEMALLOC_PREFIX_JET jet_)
 
-if(DEFINED WITH_JEPREFIX)
-  set(JEMALLOC_PRIVATE_NAMESPACE ${WITH_JEPREFIX})
-  set(JEMALLOC_PREFIX ${WITH_JEPREFIX})
+if(DEFINED with_jemalloc_prefix)
+  set(JEMALLOC_PREFIX ${with_jemalloc_prefix})
 endif()
 
-# Driven by command line options
+if(DEFINED with_private_namespace)
+  set(JEMALLOC_PRIVATE_NAMESPACE ${with_private_namespace})
+endif()
+
+if(DEFINED with-mangling)
+# We are expecting entries separated by a comma
+# with individual entries split by a ':' as in n:m
+# Convert that into a CMake list of ':' separated pairs
+  string(REPLACE "," ";" MANGLING_MAP  ${with-mangling})
+endif()
+
+# Driven by command line options originally
 # JEMALLOC_OVERRIDE_MEMALIGN
 # JEMALLOC_OVERRIDE_VALLOC
 set (JEMALLOC_OVERRIDE_MEMALIGN 0)
 set (JEMALLOC_OVERRIDE_VALLOC 0)
 set (JEMALLOC_USABLE_SIZE_CONST 0)
 
-# separate clause for MSVC
-# #undef JEMALLOC_C11ATOMICS
-
-if(DEFINED OVERRIDEMEMALIGN)
-  set(JEMALLOC_OVERRIDE_MEMALIGN ${OVERRIDEMEMALIGN})
-endif()
-
-if(DEFINED OVERRIDEVALLOC)
-  set(JEMALLOC_OVERRIDE_VALLOC ${OVERRIDEVALLOC})
-endif()
-
+###################################################
+# Undefined
 # #undef JEMALLOC_HAVE_ATTR
 # Below is everything under HAVE_ATTR
 # #undef JEMALLOC_HAVE_ATTR_ALLOC_SIZE
 # #undef JEMALLOC_HAVE_ATTR_FORMAT_GNU_PRINTF
 # #undef JEMALLOC_FORMAT_PRINTF
 # #undef JEMALLOC_USE_CXX_THROW
+#
+# separate clause for MSVC
+# #undef JEMALLOC_C11ATOMICS
 
 CHECK_TYPE_SIZE("void*" VOID_PTR_SIZE LANGUAGE C)
 #CHECK_TYPE_SIZE("long"  LONG_SIZE BUILTIN_TYPES_ONLY LANGUAGE C)
@@ -130,83 +123,46 @@ else()
  set (LG_SIZEOF_PTR 3)
 endif()
 
-# A function that configures a file and outputs
-# end result
-function (ConfigureFile file_path output_path ExpandDefine)
 
-if(EXISTS ${file_path})
-  if(NOT ${ExpandDefine})
-    # Will expand only @@ macros
-    configure_file(${file_path} ${output_path} @ONLY NEWLINE_STYLE WIN32) 
-  else()
-    # Need to Grep for ^#undef VAR lines and replace it with
-    # ^#cmakedefine VAR
-    file(REMOVE ${file_path}.cmake)
-    file(STRINGS ${file_path} INPUT_STRINGS)
-    
-    foreach(line ${INPUT_STRINGS})
-      if(${line} MATCHES "^#undef[ \t]*[^ \t]*")
-        string(REGEX REPLACE "^#undef[ \t]*([^ \t]*)" "\\1" extracted_define ${line})      
-        if(${extracted_define})
-          file(APPEND ${file_path}.cmake "#define ${extracted_define} ${${extracted_define}}\n")
-        else()
-          file(APPEND ${file_path}.cmake "/* #undef ${extracted_define} */\n\n")
-        endif()
-      else()
-        file(APPEND ${file_path}.cmake "${line}\n")
-      endif()
-    endforeach(line)
-    configure_file(${file_path}.cmake ${output_path} @ONLY NEWLINE_STYLE WIN32)
-  endif()
-else()
-  message(FATAL_ERROR "${file_path} not found")
-endif()
-
-endfunction(ConfigureFile)
-
-# Public Headers in for processing
+########################################################
+# Generate configured public headers for concatenation
+# Public Headers in for configuring
 foreach(public_in jemalloc_defs.h jemalloc_protos.h jemalloc_typedefs.h)
   ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}.in
     ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in} True)
 endforeach(public_in)  
 
-# Cmake chokes on a #define with a line continuation
+# Cmake chokes on a #define with a line continuation in jemalloc_macros.h.in
 ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h.in
     ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h False)
-    
-# Public symbols
-set(PUB_SYM ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_symbols.txt)
+
+set(PUBLIC_SYM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_symbols.txt)
+GeneratePublicSymbolsList("${PUBLIC_SYM}" "${MANGLING_MAP}" ${JEMALLOC_PREFIX}  ${PUBLIC_SYM_FILE})
+
 set(JEMALLOC_RENAME ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_rename.h)
-file(WRITE ${JEMALLOC_RENAME}
-  "/*\n * Name mangling for public symbols is controlled by --with-mangling and\n * --with-jemalloc-prefix.  With default settings the je_" "prefix is stripped by\n * these macro definitions.\n */\n#ifndef JEMALLOC_NO_RENAME\n\n"
-)
-file(STRINGS ${file_path} INPUT_STRINGS)
-foreach(line ${INPUT_STRINGS})
-  
-endforeach(line)
-file(APPEND ${JEMALLOC_RENAME}
-  "#endif\n"
-)
+GenerateJemallocRename(${PUBLIC_SYM_FILE} ${JEMALLOC_RENAME})
 
-# Generate jemalloc.h public header per jemalloc.sh
+set(JEMALLOC_MANGLE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle.h)
+GenerateJemallocMangle(${PUBLIC_SYM_FILE} ${JEMALLOC_PREFIX} ${JEMALLOC_MANGLE})
+
+# Needed for tests
+set(JEMALLOC_MANGLE_JET ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle_jet.h)
+GenerateJemallocMangle(${PUBLIC_SYM_FILE} ${JEMALLOC_PREFIX_JET} ${JEMALLOC_MANGLE_JET})
+
+# Generate main public header
 set(JEMALLOC_HDR ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc.h)
-# Header
-file(WRITE ${JEMALLOC_HDR}
-  "#ifndef JEMALLOC_H_\n#define	JEMALLOC_H_\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+
+set(JEMALLOC_HDR_LIST
+   jemalloc_defs.h
+   jemalloc_rename.h
+   jemalloc_macros.h
+   jemalloc_protos.h
+   jemalloc_typedefs.h
+   jemalloc_mangle.h
 )
 
-#jemalloc_defs.h jemalloc_rename.h jemalloc_macros.h \
-#           jemalloc_protos.h jemalloc_typedefs.h jemalloc_mangle.h
-
-# Footer
-file(APPEND ${JEMALLOC_HDR}
-"#ifdef __cplusplus\n}\n#endif\n#endif /* JEMALLOC_H_ */\n"
-)
+CreateJemallocHeader("${JEMALLOC_HDR_LIST}" ${JEMALLOC_HDR})
    
-# if (POLICY CMP0042)
-  # cmake_policy (SET CMP0042 NEW)
-# endif ()
-
 # set (DEST_DIR ${PROJECT_BINARY_DIR})
 # set (BIN_DIR ${PROJECT_BINARY_DIR})
 
