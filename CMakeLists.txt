@@ -22,9 +22,8 @@
 # Currently this file only enables building on Windows and not Cygwin or MSYS
 cmake_minimum_required (VERSION 2.8.12 FATAL_ERROR)
 
-# if (POLICY CMP0042)
-  # cmake_policy (SET CMP0042 NEW)
-# endif ()
+# Set policy based on the CMake version
+cmake_policy(VERSION 3.2.3)
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
@@ -41,6 +40,8 @@ set (jemalloc_version_minor 0)
 set (jemalloc_version_bugfix 0)
 set (jemalloc_version_nrev 0)
 set (jemalloc_version_gid "0")
+
+set(install_suffix "")
 
 find_package(Git)
 GetAndParseVersion()
@@ -89,12 +90,50 @@ if(DEFINED with-mangling)
   string(REPLACE "," ";" MANGLING_MAP  ${with-mangling})
 endif()
 
+# Base 2 log of minimum tiny size class to support
+set(LG_TINY_MIN 3)
+if(with-lg-tiny-min)
+  set(LG_TINY_MIN ${with-lg-tiny-min})
+endif()
+
+# Base 2 log of minimum allocation alignment
+set(LG_QUANTA 3 4)
+if(with-lg-quantum)
+  set(LG_QUANTA ${with-lg-quantum})
+  set(LG_QUANTUM ${with-lg-quantum})
+endif()
+
+# Base 2 log of system page size
+# Assume default is 4096
+set(LG_PAGE 12)
+if(with-lg-page)
+  set(LG_PAGE ${with-lg-page})
+endif()
+
+## TODO Figure out system page size
+#if(${LG_PAGE} STREQUAL "detect")
+  
+#endif()
+
+# Base 2 logs of system page sizes to support
+set (LG_PAGE_SIZES ${LG_PAGE})
+if(with-lg-page-sizes)
+  set(LG_PAGE_SIZES ${with-lg-page-sizes})
+endif()
+
+# Base 2 log of size classes per doubling
+set (LG_SIZE_CLASS_GROUP 2)
+if(with_lg_size_class_group)
+  set (LG_SIZE_CLASS_GROUP ${with_lg_size_class_group})
+endif()
+
+
 # Driven by command line options originally
 # JEMALLOC_OVERRIDE_MEMALIGN
 # JEMALLOC_OVERRIDE_VALLOC
 set (JEMALLOC_OVERRIDE_MEMALIGN 0)
 set (JEMALLOC_OVERRIDE_VALLOC 0)
-set (JEMALLOC_USABLE_SIZE_CONST 0)
+set (JEMALLOC_USABLE_SIZE_CONST 1)
 
 ###################################################
 # Undefined
@@ -108,23 +147,22 @@ set (JEMALLOC_USABLE_SIZE_CONST 0)
 # separate clause for MSVC
 # #undef JEMALLOC_C11ATOMICS
 
-CHECK_TYPE_SIZE("void*" VOID_PTR_SIZE LANGUAGE C)
+CHECK_TYPE_SIZE(void* SIZEOF_VOID_P LANGUAGE C)
 #CHECK_TYPE_SIZE("long"  LONG_SIZE BUILTIN_TYPES_ONLY LANGUAGE C)
 
-if(HAVE_VOID_PTR_SIZE)
-  if(${VOID_PTR_SIZE} EQUAL 8)
+if(SIZEOF_VOID_P)
+  message (STATUS "Void* size is ${SIZEOF_VOID_P}")
+  if(${SIZEOF_VOID_P} EQUAL 8)
     set (LG_SIZEOF_PTR 3)
   else()
     set (LG_SIZEOF_PTR 2)
   endif()
-  message (STATUS "Void* size is ${VOID_PTR_SIZE}")
 else()
- # 64-bit generator fails with MSVC
- set (LG_SIZEOF_PTR 3)
+  message(FATAL_ERROR "Can not determine void* size")
 endif()
 
 
-########################################################
+###########################################################################
 # Generate configured public headers for concatenation
 # Public Headers in for configuring
 foreach(public_in jemalloc_defs.h jemalloc_protos.h jemalloc_typedefs.h)
@@ -162,21 +200,27 @@ set(JEMALLOC_HDR_LIST
 )
 
 CreateJemallocHeader("${JEMALLOC_HDR_LIST}" ${JEMALLOC_HDR})
+
+##############################################################################################
+## Internal headers generation
+set(PUBLIC_NAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_namespace.h)
+PublicNamespace(${PUBLIC_SYM_FILE} ${PUBLIC_NAMESPACE_FILE})
+
+set(PUBLIC_UNNAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_unnamespace.h)
+PublicUnnamespace(${PUBLIC_SYM_FILE} ${PUBLIC_UNNAMESPACE_FILE})
+
+# This file comes with repo
+set(PRIVATE_SYM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_symbols.txt)
+
+set(PRIVATE_NAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_namespace.h)
+PrivateNamespace(${PRIVATE_SYM_FILE} ${PRIVATE_NAMESPACE_FILE})
+
+set(PRIVATE_UNNAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_unnamespace.h)
+PrivateUnnamespace(${PRIVATE_SYM_FILE} ${PRIVATE_UNNAMESPACE_FILE})
    
-# set (DEST_DIR ${PROJECT_BINARY_DIR})
-# set (BIN_DIR ${PROJECT_BINARY_DIR})
+include_directories(${PROJECT_SOURCE_DIR}/include)
 
-# message("DEST_DIR: ${DEST_DIR}");
-
-# set (LIB_DIR ${DEST_DIR}/Lib)
-# set (DATA_DIR ${DEST_DIR}/Data)
-# set (MAN_DIR ${DEST_DIR}/Man)
-
-# include_directories(${PROJECT_SOURCE_DIR}/include)
-# include_directories(${DEST_DIR}/include)
-
-# set(LIBJEMALLOCLIB ${CMAKE_STATIC_LIBRARY_PREFIX}jemalloc${CMAKE_STATIC_LIBRARY_SUFFIX})
-
+set(LIBJEMALLOCLIB jemalloc${CMAKE_STATIC_LIBRARY_SUFFIX})
    
 set(cfghdrs_internal_in
     include/jemalloc/internal/jemalloc_internal.h
@@ -191,13 +235,13 @@ set(cfghdrs_internal_in
      # include/jemalloc/internal/public_symbols.txt
      # include/jemalloc/internal/public_namespace.h
      # include/jemalloc/internal/public_unnamespace.h
-     # include/jemalloc/internal/size_classes.h
-     # include/jemalloc/internal/jemalloc_internal_defs.h
+     ###### include/jemalloc/internal/size_classes.h
+     ###### include/jemalloc/internal/jemalloc_internal_defs.h
      # include/jemalloc/jemalloc_protos_jet.h
      # include/jemalloc/jemalloc_rename.h
      # include/jemalloc/jemalloc_mangle.h
      # include/jemalloc/jemalloc_mangle_jet.h
-     # test/include/test/jemalloc_test_defs.h
+     ##### test/include/test/jemalloc_test_defs.h
      # )
 
 
@@ -221,32 +265,32 @@ set(cfghdrs_internal_in
      # include/jemalloc/jemalloc${install_suffix}.h
     # )
 
-# set(SOURCES
-  # src/arena.c
-  # src/atomic.c
-  # src/base.c
-  # src/bitmap.c
-  # src/chunk.c
-  # src/chunk_dss.c
-  # src/chunk_mmap.c
-  # src/ckh.c
-  # src/ctl.c
-  # src/extent.c
-  # src/hash.c
-  # src/huge.c
-  # src/jemalloc.c
-  # src/mb.c
-  # src/mutex.c
-  # src/pages.c
-  # src/prof.c
-  # src/quarantine.c
-  # src/rtree.c
-  # src/stats.c
-  # src/tcache.c
-  # src/tsd.c
-  # src/util.c
-  # src/valgrind.c
-  # src/zone.c
-# )
+set(SOURCES
+  src/arena.c
+  src/atomic.c
+  src/base.c
+  src/bitmap.c
+  src/chunk.c
+  src/chunk_dss.c
+  src/chunk_mmap.c
+  src/ckh.c
+  src/ctl.c
+  src/extent.c
+  src/hash.c
+  src/huge.c
+  src/jemalloc.c
+  src/mb.c
+  src/mutex.c
+  src/pages.c
+  src/prof.c
+  src/quarantine.c
+  src/rtree.c
+  src/stats.c
+  src/tcache.c
+  src/tsd.c
+  src/util.c
+  src/valgrind.c
+  src/zone.c
+)
 
-# add_library(${LIBJEMALLOCLIB} ${SOURCES})
+add_library(${LIBJEMALLOCLIB} ${SOURCES})

@@ -1,6 +1,48 @@
 # Utilities.cmake
 # Supporting functions to build Jemalloc
 
+
+###################################################
+# SizeClasses
+# Based on size_classes.sh
+# lg_qarr - quanta
+# lg_tmin - The range of tiny size classes is [2^lg_tmin..2^(lg_q-1)].
+# lg_parr - list of page sizes
+# lg_g - Size class group size (number of size classes for each size doubling).
+function (SizeClasses lg_qarr lg_tmin lg_parr lg_g)
+
+# The following limits are chosen such that they cover all supported platforms.
+
+# Pointer sizes.
+set(lg_zarr 2 3)
+
+# Maximum lookup size.
+set(lg_kmax 12)
+
+endfunction (SizeClasses)
+
+########################################################################
+# Power of two
+function (pow2 e RESULT_NAME)
+  set(pow2_result 1)
+  while ( ${e} GREATER 0 )
+    math(EXPR pow2_result ${pow2_result} + ${pow2_result})
+    math(EXPR e ${e} - 1)
+  endwhile(${e} GREATER 0 )
+  set(${RESULT_NAME} ${pow2_result} PARENT_SCOPE)
+endfunction(pow2)
+
+#########################################################################
+# Logarithm base 2
+function (lg x RESULT_NAME)
+  set(lg_result 0)
+  while ( ${x} GREATER 1 )
+    math(EXPR lg_result ${lg_result} + 1)
+    math(EXPR x ${x} / 2)
+  endwhile ( ${x} GREATER 1 )
+  set(${RESULT_NAME} ${lg_result} PARENT_SCOPE)
+endfunction(lg)
+
 #############################################
 # Generate public symbols list
 function (GeneratePublicSymbolsList public_sym_list mangling_map symbol_prefix output_file)
@@ -78,13 +120,16 @@ endfunction (GenerateJemallocMangle)
 
 ########################################################################
 # Generate jemalloc_rename.h per jemalloc_rename.sh
-function (GenerateJemallocRename public_sym_list file_path)
+function (GenerateJemallocRename public_sym_list_file file_path)
 # Header
 file(WRITE ${file_path}
-  "/*\n * Name mangling for public symbols is controlled by --with-mangling and\n * --with-jemalloc-prefix.  With" "default settings the je_" "prefix is stripped by\n * these macro definitions.\n */\n#ifndef JEMALLOC_NO_RENAME\n\n"
+  "/*\n * Name mangling for public symbols is controlled by --with-mangling and\n"
+  " * --with-jemalloc-prefix.  With" "default settings the je_" "prefix is stripped by\n"
+  " * these macro definitions.\n"
+  " */\n#ifndef JEMALLOC_NO_RENAME\n\n"
 )
 
-file(STRINGS ${public_sym_list} INPUT_STRINGS)
+file(STRINGS ${public_sym_list_file} INPUT_STRINGS)
 foreach(line ${INPUT_STRINGS})
   string(REGEX REPLACE "([^ \t]*):([^ \t]*)" "#define je_\\1 \\2" output ${line})
   file(APPEND ${file_path} "${output}\n")
@@ -102,7 +147,12 @@ endfunction (GenerateJemallocRename)
 function (CreateJemallocHeader header_list output_file)
 # File Header
 file(WRITE ${output_file}
-  "#ifndef JEMALLOC_H_\n#define	JEMALLOC_H_\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+  "#pragma once\n\n"
+  "#ifndef JEMALLOC_H_\n"
+  "#define	JEMALLOC_H_\n"
+  "#ifdef __cplusplus\n"
+  "extern \"C\" {\n"
+  "#endif\n\n"
 )
 
 foreach(pub_hdr ${header_list})
@@ -116,14 +166,69 @@ endforeach(pub_hdr)
 
 # Footer
 file(APPEND ${output_file}
-"#ifdef __cplusplus\n}\n#endif\n#endif /* JEMALLOC_H_ */\n"
+  "#ifdef __cplusplus\n"
+  "}\n"
+  "#endif\n"
+  "#endif /* JEMALLOC_H_ */\n"
 )
 endfunction(CreateJemallocHeader)
 
 ############################################################################
+# Redefines public symbols prefxied with je_ via a macro
+# Based on public_namespace.sh which echoes the result to a stdout
+function(PublicNamespace public_sym_list_file output_file)
+
+file(STRINGS ${public_sym_list_file} INPUT_STRINGS)
+foreach(line ${INPUT_STRINGS})
+  string(REGEX REPLACE "([^ \t]*):[^ \t]*" "#define	je_\\1 JEMALLOC_N(\\1)" output ${line})
+  file(APPEND ${output_file} "${output}\n")
+endforeach(line)
+  
+endfunction(PublicNamespace)
+
+############################################################################
+# #undefs public je_prefixed symbols
+# Based on public_unnamespace.sh which echoes the result to a stdout
+function(PublicUnnamespace public_sym_list_file output_file)
+
+file(STRINGS ${public_sym_list_file} INPUT_STRINGS)
+foreach(line ${INPUT_STRINGS})
+  string(REGEX REPLACE "([^ \t]*):[^ \t]*" "#undef	je_\\1" output ${line})
+  file(APPEND ${output_file} "${output}\n")
+endforeach(line)
+
+endfunction(PublicUnnamespace)
+
+
+####################################################################
+# Redefines a private symbol via a macro
+# Based on private_namespace.sh
+function(PrivateNamespace private_sym_list_file output_file)
+
+file(STRINGS ${private_sym_list_file} INPUT_STRINGS)
+foreach(line ${INPUT_STRINGS})
+  file(APPEND ${output_file} "#define	${line} JEMALLOC_N(${line}\n")
+endforeach(line)
+
+endfunction(PrivateNamespace)
+
+####################################################################
+# Redefines a private symbol via a macro
+# Based on private_namespace.sh
+function(PrivateUnnamespace private_sym_list_file output_file)
+
+file(STRINGS ${private_sym_list_file} INPUT_STRINGS)
+foreach(line ${INPUT_STRINGS})
+  file(APPEND ${output_file} "#undef ${line}\n")
+endforeach(line)
+
+endfunction(PrivateUnnamespace)
+
+
+############################################################################
 # A function that configures a file_path and outputs
 # end result into output_path
-# ExapndDefine True/False if we want to process the file and expand
+# ExpandDefine True/False if we want to process the file and expand
 # lines that start with #undef DEFINE into what is defined in CMAKE
 function (ConfigureFile file_path output_path ExpandDefine)
 
@@ -167,39 +272,43 @@ if (GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     
     # Figure out version components    
     string (REPLACE "\n" "" jemalloc_version  ${jemalloc_version})
+    set(jemalloc_version ${jemalloc_version} PARENT_SCOPE)
     message(STATUS "Version is ${jemalloc_version}")
 
     # replace in this order to get a valid cmake list
     string (REPLACE "-g" "-" T_VERSION ${jemalloc_version})
     string (REPLACE "-" "." T_VERSION  ${T_VERSION})
     string (REPLACE "." ";" T_VERSION  ${T_VERSION})
-    message(STATUS "T_VERSION is ${T_VERSION}")
-    
+
     list(LENGTH T_VERSION L_LEN)
-    message(STATUS "T_VERSION len is ${L_LEN}")
-    
+
     if(${L_LEN} GREATER 0)
       list(GET T_VERSION 0 jemalloc_version_major)
-      message(STATUS "Major: ${jemalloc_version_major}")
+      set(jemalloc_version_major ${jemalloc_version_major} PARENT_SCOPE)
+      message(STATUS "jemalloc_version_major: ${jemalloc_version_major}")
     endif()
 
     if(${L_LEN} GREATER 1)
       list(GET T_VERSION 1 jemalloc_version_minor)
-      message(STATUS "Minor: ${jemalloc_version_minor}")
+      set(jemalloc_version_minor ${jemalloc_version_minor} PARENT_SCOPE)
+      message(STATUS "jemalloc_version_minor: ${jemalloc_version_minor}")
     endif()
 
     if(${L_LEN} GREATER 2)
       list(GET T_VERSION 2 jemalloc_version_bugfix)
+      set(jemalloc_version_bugfix ${jemalloc_version_bugfix} PARENT_SCOPE)
       message(STATUS "jemalloc_version_bugfix: ${jemalloc_version_bugfix}")
     endif()
 
     if(${L_LEN} GREATER 3)
       list(GET T_VERSION 3 jemalloc_version_nrev)
+      set(jemalloc_version_nrev ${jemalloc_version_nrev} PARENT_SCOPE)
       message(STATUS "jemalloc_version_nrev: ${jemalloc_version_nrev}")
     endif()
 
     if(${L_LEN} GREATER 4)
       list(GET T_VERSION 4 jemalloc_version_gid)
+      set(jemalloc_version_gid ${jemalloc_version_gid} PARENT_SCOPE)
       message(STATUS "jemalloc_version_gid: ${jemalloc_version_gid}")
     endif()
 endif()
