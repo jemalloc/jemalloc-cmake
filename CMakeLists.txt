@@ -20,10 +20,10 @@
 #
 
 # Currently this file only enables building on Windows and not Cygwin or MSYS
-cmake_minimum_required (VERSION 3.0 FATAL_ERROR)
+cmake_minimum_required (VERSION 3.4 FATAL_ERROR)
 
 # Set policy based on the CMake version
-cmake_policy(VERSION 3.2.3)
+cmake_policy(VERSION 3.4.3)
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
@@ -291,30 +291,30 @@ set(PUBLIC_SYM
   malloc_usable_size
 )
 
-set(PUBLIC_SYM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_symbols.txt)
-GeneratePublicSymbolsList("${PUBLIC_SYM}" "${MANGLING_MAP}" ${JEMALLOC_PREFIX}  ${PUBLIC_SYM_FILE})
+set(PUBLIC_SYM_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_symbols.txt")
+GeneratePublicSymbolsList("${PUBLIC_SYM}" "${MANGLING_MAP}" ${JEMALLOC_PREFIX}  "${PUBLIC_SYM_FILE}")
 
 foreach(public_in jemalloc_defs.h jemalloc_protos.h jemalloc_typedefs.h)
-  ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in} True)
+  ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}" True)
 endforeach(public_in)  
 
 # Cmake chokes on a #define with a line continuation in jemalloc_macros.h.in
-ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h False)
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h" False)
 
-set(JEMALLOC_RENAME ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_rename.h)
-GenerateJemallocRename(${PUBLIC_SYM_FILE} ${JEMALLOC_RENAME})
+set(JEMALLOC_RENAME "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_rename.h")
+GenerateJemallocRename("${PUBLIC_SYM_FILE}" ${JEMALLOC_RENAME})
 
-set(JEMALLOC_MANGLE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle.h)
-GenerateJemallocMangle(${PUBLIC_SYM_FILE} ${JEMALLOC_PREFIX} ${JEMALLOC_MANGLE})
+set(JEMALLOC_MANGLE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle.h")
+GenerateJemallocMangle("${PUBLIC_SYM_FILE}" ${JEMALLOC_PREFIX} ${JEMALLOC_MANGLE})
 
 # Needed for tests
-set(JEMALLOC_MANGLE_JET ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle_jet.h)
-GenerateJemallocMangle(${PUBLIC_SYM_FILE} ${JEMALLOC_PREFIX_JET} ${JEMALLOC_MANGLE_JET})
+set(JEMALLOC_MANGLE_JET "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle_jet.h")
+GenerateJemallocMangle("${PUBLIC_SYM_FILE}" ${JEMALLOC_PREFIX_JET} ${JEMALLOC_MANGLE_JET})
 
 # Generate main public header
-set(JEMALLOC_HDR ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc.h)
+set(JEMALLOC_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc.h")
 
 set(JEMALLOC_HDR_LIST
    jemalloc_defs.h
@@ -325,42 +325,42 @@ set(JEMALLOC_HDR_LIST
    jemalloc_mangle.h
 )
 
-CreateJemallocHeader("${JEMALLOC_HDR_LIST}" ${JEMALLOC_HDR})
+CreateJemallocHeader("${JEMALLOC_HDR_LIST}" "${JEMALLOC_HDR}")
 
 ##############################################################################################
 ## Internal headers generation
-set(PUBLIC_NAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_namespace.h)
-PublicNamespace(${PUBLIC_SYM_FILE} ${PUBLIC_NAMESPACE_FILE})
+set(PUBLIC_NAMESPACE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_namespace.h")
+PublicNamespace(${PUBLIC_SYM_FILE} "${PUBLIC_NAMESPACE_FILE}")
 
-set(PUBLIC_UNNAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_unnamespace.h)
-PublicUnnamespace(${PUBLIC_SYM_FILE} ${PUBLIC_UNNAMESPACE_FILE})
+set(PUBLIC_UNNAMESPACE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_unnamespace.h")
+PublicUnnamespace(${PUBLIC_SYM_FILE} "${PUBLIC_UNNAMESPACE_FILE}")
 
 # This file comes with repo
-set(PRIVATE_SYM_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_symbols.txt)
+set(PRIVATE_SYM_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_symbols.txt")
 
-set(PRIVATE_NAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_namespace.h)
-PrivateNamespace(${PRIVATE_SYM_FILE} ${PRIVATE_NAMESPACE_FILE})
+set(PRIVATE_NAMESPACE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_namespace.h")
+PrivateNamespace("${PRIVATE_SYM_FILE}" "${PRIVATE_NAMESPACE_FILE}")
 
-set(PRIVATE_UNNAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_unnamespace.h)
-PrivateUnnamespace(${PRIVATE_SYM_FILE} ${PRIVATE_UNNAMESPACE_FILE})
+set(PRIVATE_UNNAMESPACE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_unnamespace.h")
+PrivateUnnamespace("${PRIVATE_SYM_FILE}" "${PRIVATE_UNNAMESPACE_FILE}")
 
 # Configure internal
 # Chokes on line continuation so we only do @@ replacement which is required
-ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h.in
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h  False)
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h.in"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h"  False)
 
-ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h True)
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h" True)
 
 # Test related
-ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h True)
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h" True)
 
 # Line continuations are a problem for configuring defines but not required here
-ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h False)
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h" False)
 
-set(SIZE_CLASSES_HDR ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size_classes.h)
+set(SIZE_CLASSES_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size_classes.h")
 SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"
  ${SIZE_CLASSES_HDR})
 
