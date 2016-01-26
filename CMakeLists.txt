@@ -48,10 +48,10 @@ set(install_suffix "")
 find_package(Git)
 GetAndParseVersion()
 
-# @je_@ prefix driven by a command line
 # default is on
 set(JEMALLOC_PRIVATE_NAMESPACE je_)
 set(JEMALLOC_PREFIX je_)
+set(je_ je_)
 set(JEMALLOC_PREFIX_JET jet_)
 set(JEMALLOC_CPREFIX JE_)
 
@@ -60,6 +60,7 @@ set(private_namespace ${JEMALLOC_PRIVATE_NAMESPACE})
 
 if(with-jemalloc-prefix)
   set(JEMALLOC_PREFIX ${with_jemalloc_prefix})
+  set(je_ ${with_jemalloc_prefix})
 endif()
 
 if(with-private-namespace)
@@ -172,7 +173,7 @@ endif()
 # JEMALLOC_OVERRIDE_VALLOC
 set (JEMALLOC_OVERRIDE_MEMALIGN 0)
 set (JEMALLOC_OVERRIDE_VALLOC 0)
-set (JEMALLOC_USABLE_SIZE_CONST 1)
+set (JEMALLOC_USABLE_SIZE_CONST const)
 
 ###################################################
 # Undefined
@@ -186,9 +187,14 @@ set (JEMALLOC_USABLE_SIZE_CONST 1)
 
 set (CPU_SPINWAIT "YieldProcessor()")
 
-# separate clause for MSVC so might not
-# be relevant
-set(JEMALLOC_C11ATOMICS 1)
+# MSVC 13 does not have it but perhaps
+# might have later
+if(HAVE_STDATOMIC_H)
+  set(JEMALLOC_C11ATOMICS 1)
+else()
+set(JEMALLOC_C11ATOMICS 0)
+endif()
+
 # Relevant for FreeBSD only
 set(JEMALLOC_ATOMIC9 0)
 # Only for iOS
@@ -223,21 +229,21 @@ set(JEMALLOC_MAPS_COALESCE 0)
 
 # Separate clause for _WIN32 does the right thing
 set(JEMALLOC_TLS 0)
-
-
-set (JEMALLOC_HAS_RESTRICT 0)
+set (JEMALLOC_HAS_RESTRICT 1)
 
 CHECK_INCLUDE_FILES (alloca.h JEMALLOC_HAS_ALLOCA_H)
-CHECK_INCLUDE_FILES (malloc.h HAVE_MALLOC_H)
-CHECK_INCLUDE_FILES (sys/types.h HAVE_SYS_TYPES_H)
-CHECK_INCLUDE_FILES (sys/stat.h HAVE_SYS_STAT_H)
-CHECK_INCLUDE_FILES (stdlib.h HAVE_STDLIB_H)
-CHECK_INCLUDE_FILES (string.h HAVE_STRING_H)
-CHECK_INCLUDE_FILES (memory.h HAVE_MEMORY_H)
-CHECK_INCLUDE_FILES (strings.h HAVE_STRINGS_H)
 CHECK_INCLUDE_FILES (inttypes.h HAVE_INTTYPES_H)
-CHECK_INCLUDE_FILES (stdint.h HAVE_STDINT_H)
-CHECK_INCLUDE_FILES (unitstd.h HAVE_UNISTD_H)
+CHECK_INCLUDE_FILES (stdatomic.h HAVE_STDATOMIC_H)
+
+#CHECK_INCLUDE_FILES (malloc.h HAVE_MALLOC_H)
+#CHECK_INCLUDE_FILES (sys/types.h HAVE_SYS_TYPES_H)
+#CHECK_INCLUDE_FILES (sys/stat.h HAVE_SYS_STAT_H)
+# CHECK_INCLUDE_FILES (stdlib.h HAVE_STDLIB_H)
+# CHECK_INCLUDE_FILES (string.h HAVE_STRING_H)
+# CHECK_INCLUDE_FILES (memory.h HAVE_MEMORY_H)
+# CHECK_INCLUDE_FILES (strings.h HAVE_STRINGS_H)
+# CHECK_INCLUDE_FILES (stdint.h HAVE_STDINT_H)
+# CHECK_INCLUDE_FILES (unitstd.h HAVE_UNISTD_H)
 
 UtilCheckTypeSize(void* SIZEOF_VOID_P)
 if(SIZEOF_VOID_P)
@@ -258,18 +264,6 @@ UtilCheckTypeSize(intmax_t SIZEOF_INTMAX_T)
 if(SIZEOF_INTMAX_T)
   lg(${SIZEOF_INTMAX_T} "LG_SIZEOF_INTMAX_T")
 endif()
-
-# set(Val 9)
-# UtilLeftAlign(${Val} 3 "OUT_ALIGN")
-# message(STATUS ${OUT_ALIGN})
-
-# set(Val "fasdasdfds")
-# UtilLeftAlign(${Val} 3 "OUT_ALIGN")
-# message(STATUS ${OUT_ALIGN})
-
-# set(Val "")
-# UtilLeftAlign("${Val}" 3 "OUT_ALIGN")
-# message(STATUS ${OUT_ALIGN})
 
 ###########################################################################
 # Generate configured public headers for concatenation
@@ -351,70 +345,46 @@ set(PRIVATE_UNNAMESPACE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/intern
 PrivateUnnamespace(${PRIVATE_SYM_FILE} ${PRIVATE_UNNAMESPACE_FILE})
 
 # Configure internal
-# Chokes on line continuation
+# Chokes on line continuation so we only do @@ replacement which is required
 ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h.in
   ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h  False)
 
 ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h.in
     ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h True)
 
-# set (cfghdrs_out
-     # include/jemalloc/jemalloc_defs.h
-     # include/jemalloc/jemalloc.h
-     # include/jemalloc/internal/private_namespace.h
-     # include/jemalloc/internal/private_unnamespace.h
-     # include/jemalloc/internal/public_symbols.txt
-     # include/jemalloc/internal/public_namespace.h
-     # include/jemalloc/internal/public_unnamespace.h
-     ###### include/jemalloc/internal/size_classes.h
-     ###### include/jemalloc/internal/jemalloc_internal_defs.h
-     # include/jemalloc/jemalloc_protos_jet.h
-     # include/jemalloc/jemalloc_rename.h
-     # include/jemalloc/jemalloc_mangle.h
-     # include/jemalloc/jemalloc_mangle_jet.h
-     ##### test/include/test/jemalloc_test_defs.h
-     # )
+# Test related
+ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h True)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+# Line continuations are a problem for configuring defines but not required here
+ConfigureFile(${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h False)
+
+set(SIZE_CLASSES_HDR ${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size_classes.h)
+SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"
+ ${SIZE_CLASSES_HDR})
 
 set(LIBJEMALLOCLIB jemalloc${CMAKE_STATIC_LIBRARY_SUFFIX})
 
 # Add to defines
 set(JEMALLOC_CC_SILENCE 0)
 
-# NATIVE flags:
+# May want to replace  /d2Zi+ to /Zo
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DJEMALLOC_DEBUG /Od /RTC1 /Gm /MTd" )
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MT")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
 
-# CC="$CC -nologo"
-# JE_CFLAGS_APPEND([-Zi])
-# JE_CFLAGS_APPEND([-MT])
-# JE_CFLAGS_APPEND([-W3])
-# JE_CFLAGS_APPEND([-FS])
-# CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat"
+add_definitions(-D_MBCS)
 
-# If no INTTYPES_h add the below
-# CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat/C99"
+include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat)
 
-# Add JEMALLOC_DEBUG for debug build
-     
-# if(OS_WIN)
-  # if (MSVC)
-    # message (STATUS "Building with Microsoft VS")
-    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /FC /d2Zi+ /Zi /nologo /W3 /WX /EHsc /GS /fp:precise /Zc:wchar_t /Zc:forScope /Gd /TP /errorReport:queue")
-    # set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /Od /RTC1 /Gm /MDd")
-    # set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /Gm- /Gy /MD")
-    # set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
-    # add_definitions(-DWIN32 -DOS_WIN -D_MBCS -DWIN64)
-    # set(install_suffix "")
-  # else()
-    # message (FATAL_ERROR "Need to specify settings for your compiler")
-  # endif()
-# else()
-  # message (FATAL_ERROR "Do not know how to build on your system!")
-# endif()
+if(NOT HAVE_INTTYPES_H)
+  include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat/C99)
+endif()
 
-# set (C_HDRS
-     # include/jemalloc/jemalloc${install_suffix}.h
-    # )
+set(install_suffix "")
 
 set(SOURCES
   src/arena.c
