@@ -6,6 +6,9 @@
 #  include <windows.h>
 #  include "msvc_compat/windows_extra.h"
 
+#  include <process.h>
+#  define getpid _getpid
+
 #else
 #  include <sys/param.h>
 #  include <sys/mman.h>
