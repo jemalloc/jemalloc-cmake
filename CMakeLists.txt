@@ -48,12 +48,17 @@ set(install_suffix "")
 find_package(Git)
 GetAndParseVersion()
 
+CHECK_INCLUDE_FILES (alloca.h JEMALLOC_HAS_ALLOCA_H)
+CHECK_INCLUDE_FILES (inttypes.h HAVE_INTTYPES_H)
+CHECK_INCLUDE_FILES (stdatomic.h JEMALLOC_C11ATOMICS)
+
 # default is on
 set(JEMALLOC_PRIVATE_NAMESPACE je_)
 set(JEMALLOC_PREFIX je_)
 set(je_ je_)
 set(JEMALLOC_PREFIX_JET jet_)
-set(JEMALLOC_CPREFIX JE_)
+# Must have quotes as is used in preprocessor concatenation
+set(JEMALLOC_CPREFIX "\"JE_\"")
 
 # For internal header expansion
 set(private_namespace ${JEMALLOC_PRIVATE_NAMESPACE})
@@ -187,14 +192,6 @@ set (JEMALLOC_USABLE_SIZE_CONST const)
 
 set (CPU_SPINWAIT "YieldProcessor()")
 
-# MSVC 13 does not have it but perhaps
-# might have later
-if(HAVE_STDATOMIC_H)
-  set(JEMALLOC_C11ATOMICS 1)
-else()
-set(JEMALLOC_C11ATOMICS 0)
-endif()
-
 # Relevant for FreeBSD only
 set(JEMALLOC_ATOMIC9 0)
 # Only for iOS
@@ -217,8 +214,9 @@ set(JEMALLOC_PROF 0)
 set(JEMALLOC_PROF_LIBUNWIND 0)
 set(JEMALLOC_PROF_LIBGCC 0)
 set(JEMALLOC_PROF_GCC 0)
-set(JEMALLOC_INTERNAL_FFSL 0)
-set(JEMALLOC_INTERNAL_FFS 0)
+# ffsl and ffs are defined in msvc_compat/strings.h
+set(JEMALLOC_INTERNAL_FFSL ffsl)
+set(JEMALLOC_INTERNAL_FFS ffs)
 
 #If defined, adjacent virtual memory mappings with identical attributes
 # automatically coalesce, and they fragment when changes are made to subranges.
@@ -230,20 +228,6 @@ set(JEMALLOC_MAPS_COALESCE 0)
 # Separate clause for _WIN32 does the right thing
 set(JEMALLOC_TLS 0)
 set (JEMALLOC_HAS_RESTRICT 1)
-
-CHECK_INCLUDE_FILES (alloca.h JEMALLOC_HAS_ALLOCA_H)
-CHECK_INCLUDE_FILES (inttypes.h HAVE_INTTYPES_H)
-CHECK_INCLUDE_FILES (stdatomic.h HAVE_STDATOMIC_H)
-
-#CHECK_INCLUDE_FILES (malloc.h HAVE_MALLOC_H)
-#CHECK_INCLUDE_FILES (sys/types.h HAVE_SYS_TYPES_H)
-#CHECK_INCLUDE_FILES (sys/stat.h HAVE_SYS_STAT_H)
-# CHECK_INCLUDE_FILES (stdlib.h HAVE_STDLIB_H)
-# CHECK_INCLUDE_FILES (string.h HAVE_STRING_H)
-# CHECK_INCLUDE_FILES (memory.h HAVE_MEMORY_H)
-# CHECK_INCLUDE_FILES (strings.h HAVE_STRINGS_H)
-# CHECK_INCLUDE_FILES (stdint.h HAVE_STDINT_H)
-# CHECK_INCLUDE_FILES (unitstd.h HAVE_UNISTD_H)
 
 UtilCheckTypeSize(void* SIZEOF_VOID_P)
 if(SIZEOF_VOID_P)
@@ -362,7 +346,7 @@ ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h.in"
 
 set(SIZE_CLASSES_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size_classes.h")
 SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"
- ${SIZE_CLASSES_HDR})
+ "${SIZE_CLASSES_HDR}")
 
 set(LIBJEMALLOCLIB jemalloc${CMAKE_STATIC_LIBRARY_SUFFIX})
 
@@ -371,11 +355,20 @@ set(JEMALLOC_CC_SILENCE 0)
 
 # May want to replace  /d2Zi+ to /Zo
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
+
+# Separate line for warnings suppression mostly due to the fact we have ints 32 bits
+# - C4267 due to the fact we have ints 32 bits
+# - C4244 simular typedef unsigned szind_t
+# - C4146 alignment calculation applies negation to a unsigned type
+# - C4334 - result of 32-bit shift implicitly converted to 64 bits
+# - C4090 - some modifiable parameters are passed with a const qualifier
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244 /wd4146 /wd4334 /wd4090")
+
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DJEMALLOC_DEBUG /Od /RTC1 /Gm /MTd" )
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MT")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
 
-add_definitions(-D_MBCS)
+add_definitions(-D_MBCS -DDLLEXPORT)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat)
@@ -410,8 +403,8 @@ set(SOURCES
   src/tcache.c
   src/tsd.c
   src/util.c
-  src/valgrind.c
-  src/zone.c
+  # src/valgrind.c # Valgrind integration only
+  # src/zone.c # Darwin only file
 )
 
 add_library(${LIBJEMALLOCLIB} ${SOURCES})

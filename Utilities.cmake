@@ -17,27 +17,6 @@ endif()
 endfunction(UtilCheckTypeSize)
 
 ########################################################################
-## Try some formatting
-function(UtilLeftAlign value alignment output_var)
-
-  if(value)
-    string(LENGTH ${value} len)
-    message(STATUS "Len: ${len}")
-
-    if(${len} GREATER ${alignment})
-      set(out ${value})
-    else()
-      math(EXPR len "${alignment} - ${len}")
-      foreach(i RANGE len)
-        set(out " ${out}")
-      endforeach(i)
-    endif()
-  endif()
-  
-  set(${output_var} ${out} PARENT_SCOPE)
-endfunction(UtilLeftAlign)
-
-########################################################################
 # Power of two
 # returns result in a VAR whose name is in RESULT_NAME
 function (pow2 e RESULT_NAME)
@@ -565,6 +544,7 @@ endfunction(CreateJemallocHeader)
 # Based on public_namespace.sh which echoes the result to a stdout
 function(PublicNamespace public_sym_list_file output_file)
 
+file(REMOVE ${output_file})
 file(STRINGS "${public_sym_list_file}" INPUT_STRINGS)
 foreach(line ${INPUT_STRINGS})
   string(REGEX REPLACE "([^ \t]*):[^ \t]*" "#define	je_\\1 JEMALLOC_N(\\1)" output ${line})
@@ -578,6 +558,7 @@ endfunction(PublicNamespace)
 # Based on public_unnamespace.sh which echoes the result to a stdout
 function(PublicUnnamespace public_sym_list_file output_file)
 
+file(REMOVE ${output_file})
 file(STRINGS "${public_sym_list_file}" INPUT_STRINGS)
 foreach(line ${INPUT_STRINGS})
   string(REGEX REPLACE "([^ \t]*):[^ \t]*" "#undef	je_\\1" output ${line})
@@ -592,9 +573,10 @@ endfunction(PublicUnnamespace)
 # Based on private_namespace.sh
 function(PrivateNamespace private_sym_list_file output_file)
 
+file(REMOVE ${output_file})
 file(STRINGS ${private_sym_list_file} INPUT_STRINGS)
 foreach(line ${INPUT_STRINGS})
-  file(APPEND ${output_file} "#define	${line} JEMALLOC_N(${line}\n")
+  file(APPEND ${output_file} "#define	${line} JEMALLOC_N(${line})\n")
 endforeach(line)
 
 endfunction(PrivateNamespace)
@@ -604,6 +586,7 @@ endfunction(PrivateNamespace)
 # Based on private_namespace.sh
 function(PrivateUnnamespace private_sym_list_file output_file)
 
+file(REMOVE ${output_file})
 file(STRINGS ${private_sym_list_file} INPUT_STRINGS)
 foreach(line ${INPUT_STRINGS})
   file(APPEND ${output_file} "#undef ${line}\n")
@@ -641,7 +624,7 @@ if(EXISTS ${file_path})
       endif()
     endforeach(line)
     configure_file(${file_path}.cmake ${output_path} @ONLY NEWLINE_STYLE WIN32)
-    # file(REMOVE ${file_path}.cmake)
+    file(REMOVE ${file_path}.cmake)
   endif()
 else()
   message(FATAL_ERROR "${file_path} not found")
