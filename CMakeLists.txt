@@ -51,6 +51,7 @@ GetAndParseVersion()
 CHECK_INCLUDE_FILES (alloca.h JEMALLOC_HAS_ALLOCA_H)
 CHECK_INCLUDE_FILES (inttypes.h HAVE_INTTYPES_H)
 CHECK_INCLUDE_FILES (stdatomic.h JEMALLOC_C11ATOMICS)
+CHECK_INCLUDE_FILES (sys/time.h HAVE_SYSTIME_H)
 
 # default is on
 set(JEMALLOC_PRIVATE_NAMESPACE je_)
@@ -348,7 +349,17 @@ set(SIZE_CLASSES_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size
 SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"
  "${SIZE_CLASSES_HDR}")
 
-set(LIBJEMALLOCLIB jemalloc${CMAKE_STATIC_LIBRARY_SUFFIX})
+ # To generate protos_jet
+set(je_ jet_)
+
+# replace prefix only
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos.h.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos_jet.h" True)
+
+# revert
+set(je__ je_)
+
+set(LIBJEMALLOCLIB jemalloc)
 
 # Add to defines
 set(JEMALLOC_CC_SILENCE 0)
@@ -366,7 +377,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244 /wd4146 /wd4334 /wd4090")
 
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DJEMALLOC_DEBUG /Od /RTC1 /Gm /MTd" )
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MT")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
+# Make sure that PDBs are always generated
+set(CMAKE_STATIC_LINKER_FLAGS "${CMAKE_STATIC_LINKER_FLAGS} /DEBUG")
 
 add_definitions(-D_MBCS -DDLLEXPORT)
 
@@ -408,3 +420,9 @@ set(SOURCES
 )
 
 add_library(${LIBJEMALLOCLIB} ${SOURCES})
+
+set(LIBJEMALLOCTESTLIB jemalloctestlibrary)
+add_subdirectory(test/src)
+
+add_subdirectory(test/stress)
+
