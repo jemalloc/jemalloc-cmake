@@ -456,11 +456,6 @@ ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos.h.in
 # revert
 set(je__ je_)
 
-set(LIBJEMALLOCLIB jemalloc${install_suffix})
-
-# Add to defines
-
-
 # May want to replace  /d2Zi+ to /Zo
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
 
@@ -488,7 +483,7 @@ if(NOT HAVE_INTTYPES_H)
   include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat/C99)
 endif()
 
-set(SOURCES
+set(C_SRCS
   src/arena.c
   src/atomic.c
   src/base.c
@@ -516,9 +511,187 @@ set(SOURCES
   # src/zone.c # Darwin only file
 )
 
-add_library(${LIBJEMALLOCLIB} ${SOURCES})
+# The original library, delivery product
+set(LIBJEMALLOCLIB jemalloc${install_suffix})
+add_library(${LIBJEMALLOCLIB} ${C_SRCS})
 
-set(LIBJEMALLOCTESTLIB jemalloctestlibrary)
-#add_subdirectory(test/src)
-#add_subdirectory(test/stress)
+##################################################################
+## Building tests
+
+# Rebuild for JET
+set(C_JETLIB jemalloc_jet${install_suffix})
+add_library(${C_JETLIB} ${C_SRCS})
+set_target_properties(${C_JETLIB}
+           PROPERTIES
+           COMPILE_DEFINITIONS 
+           JEMALLOC_JET
+)
+
+# Form here onward
+include_directories(${PROJECT_SOURCE_DIR}/test/include)
+
+# C4018 signed/unsigned mismatch in timer.c
+set(COMMON_TESTLIB_CCFLAGS /wd4018)
+
+set(C_TESTLIB_SRCS
+    test/src/btalloc.c
+    test/src/btalloc_0.c
+    test/src/btalloc_1.c
+    test/src/math.c
+    test/src/mq.c
+    test/src/mtx.c
+    test/src/SFMT.c
+    test/src/test.c
+    test/src/thd.c
+    test/src/timer.c
+)
+
+# Unit tests test library
+set(C_TESTLIB_UNIT jemalloc_unit_test${install_suffix})
+add_library(${C_TESTLIB_UNIT} ${C_TESTLIB_SRCS})
+set_target_properties(${C_TESTLIB_UNIT}
+           PROPERTIES
+           COMPILE_OPTIONS 
+           ${COMMON_TESTLIB_CCFLAGS} 
+           COMPILE_DEFINITIONS
+           JEMALLOC_UNIT_TEST
+)
+
+# Integration test library
+set(C_TESTLIB_INTEGRATION jemalloc_int_test${install_suffix})
+add_library(${C_TESTLIB_INTEGRATION} ${C_TESTLIB_SRCS})
+set_target_properties(${C_TESTLIB_INTEGRATION}
+           PROPERTIES
+           COMPILE_OPTIONS 
+           ${COMMON_TESTLIB_CCFLAGS}
+           COMPILE_DEFINITIONS 
+           JEMALLOC_INTEGRATION_TEST
+)
+
+# Stress test library
+set(C_TESTLIB_STRESS jemalloc_test_stress${install_suffix})
+add_library(${C_TESTLIB_STRESS} ${C_TESTLIB_SRCS})
+set_target_properties(${C_TESTLIB_STRESS}
+           PROPERTIES
+           COMPILE_OPTIONS 
+           ${COMMON_TESTLIB_CCFLAGS}
+           COMPILE_DEFINITIONS
+           "JEMALLOC_STRESS_TEST;JEMALLOC_STRESS_TESTLIB"
+)
+
+set(C_UTIL_INTEGRATION_SRCS
+    src/util.c
+)
+
+# Util integration
+# We need this library consisting from a single file
+# compiled with jet_ prefix for a benchmark because
+# when linking the whole JET library we get duplicate symbols
+# this is the it is done in the original makefile
+set(C_UTIL_INTEGRATION jemalloc_util_int_test${install_suffix})
+add_library(${C_UTIL_INTEGRATION} ${C_UTIL_INTEGRATION_SRCS})
+set_target_properties(${C_UTIL_INTEGRATION}
+           PROPERTIES
+           COMPILE_DEFINITIONS 
+           JEMALLOC_JET
+)
+
+set(TESTS_UNIT
+    test/unit/atomic.c
+    test/unit/bitmap.c
+    test/unit/ckh.c
+    test/unit/hash.c
+    test/unit/junk.c
+    test/unit/junk_alloc.c
+    test/unit/junk_free.c
+    test/unit/lg_chunk.c
+    test/unit/mallctl.c
+    test/unit/math.c
+    test/unit/mq.c
+    test/unit/mtx.c
+    test/unit/prof_accum.c
+    test/unit/prof_active.c
+    test/unit/prof_gdump.c
+    test/unit/prof_idump.c
+    test/unit/prof_reset.c
+    test/unit/prof_thread_name.c
+    test/unit/ql.c
+    test/unit/qr.c
+    test/unit/quarantine.c
+    test/unit/rb.c
+    test/unit/rtree.c
+    test/unit/SFMT.c
+    test/unit/size_classes.c
+    test/unit/stats.c
+    test/unit/tsd.c
+    test/unit/util.c
+    test/unit/zero.c
+)
+
+# Build Unit tests
+foreach(sourcefile ${TESTS_UNIT})
+    string(REPLACE ".c" "" exename ${sourcefile})
+    string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
+    set(exename "${exename}${install_suffix}")
+    add_executable(${exename} ${sourcefile})
+    set_target_properties(${exename}
+               PROPERTIES
+               COMPILE_OPTIONS    # 
+               # test\unit\math.c(202): warning C4056: overflow in floating-point constant arithmetic (only VS 13)
+               # test\unit\tsd.c: 4312: bitmap signed/unsigned
+               "${COMMON_TESTLIB_CCFLAGS};/wd4312;/wd4056"
+               COMPILE_DEFINITIONS 
+               JEMALLOC_UNIT_TEST
+    )
+    target_link_libraries(${exename} ${C_TESTLIB_UNIT} ${C_JETLIB} ${LIBJEMALLOCLIB})
+endforeach(sourcefile ${TESTS_UNIT})
+
+
+set(TESTS_INTEGRATION
+    test/integration/aligned_alloc.c
+    test/integration/allocated.c
+    test/integration/sdallocx.c
+    test/integration/mallocx.c
+    test/integration/MALLOCX_ARENA.c
+    test/integration/overflow.c
+    test/integration/posix_memalign.c
+    test/integration/rallocx.c
+    test/integration/thread_arena.c
+    test/integration/thread_tcache_enabled.c
+    test/integration/xallocx.c
+    test/integration/chunk.c
+)
+
+# Build integration tests
+foreach(sourcefile ${TESTS_INTEGRATION})
+    string(REPLACE ".c" "" exename ${sourcefile})
+    string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
+    set(exename "${exename}${install_suffix}")
+    add_executable(${exename} ${sourcefile})
+    set_target_properties(${exename}
+               PROPERTIES
+               COMPILE_DEFINITIONS 
+               JEMALLOC_INTEGRATION_TEST
+    )
+    target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
+endforeach(sourcefile ${TESTS_UNIT})
+
+# set(TESTS_STRESS
+    # test/stress/microbench.c
+# )
+
+# # Build Stress tests
+# foreach(sourcefile ${TESTS_STRESS})
+    # string(REPLACE ".c" "" exename ${sourcefile})
+    # string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
+    # set(exename "${exename}${install_suffix}")
+    # add_executable(${exename} ${sourcefile})
+    # set_target_properties(${exename}
+               # PROPERTIES
+               # COMPILE_DEFINITIONS 
+               # JEMALLOC_STRESS_TEST
+    # )
+    # target_link_libraries(${exename} ${C_TESTLIB_STRESS} ${LIBJEMALLOCLIB} ${C_UTIL_INTEGRATION})
+# endforeach(sourcefile ${TESTS_UNIT})
+
 
