@@ -110,7 +110,6 @@ bool
 malloc_tsd_boot0(void)
 {
 
-	ncleanups = 0;
 	if (tsd_boot0())
 		return (true);
 	*tsd_arenas_cache_bypassp_get(tsd_fetch()) = true;
@@ -126,7 +125,9 @@ malloc_tsd_boot1(void)
 }
 
 #ifdef _WIN32
-static BOOL WINAPI
+
+static
+BOOL WINAPI
 _tls_callback(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
 
@@ -148,14 +149,30 @@ _tls_callback(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 #ifdef _MSC_VER
 #  ifdef _M_IX86
 #    pragma comment(linker, "/INCLUDE:__tls_used")
+//#    pragma comment(linker, "/INCLUDE:__tls_callback")
+#    pragma data_seg(".CRT$XLB")
+PIMAGE_TLS_CALLBACK p_thread_callback_on_exit = _tls_callback;
+/* Reset the default section. */
+#    pragma data_seg()
 #  else
 #    pragma comment(linker, "/INCLUDE:_tls_used")
+#    pragma comment(linker, "/INCLUDE:_tls_callback")
+/* .CRT section is merged with .rdata on x64 so it must be constant data. */
+#    pragma const_seg(".CRT$XLB")
+/* When defining a const variable, it must have external linkage to be sure the
+   linker doesn't discard it.
+*/
+extern const PIMAGE_TLS_CALLBACK p_thread_callback_on_exit;
+const PIMAGE_TLS_CALLBACK p_thread_callback_on_exit = _tls_callback;
+/* Reset the default section. */
+#   pragma const_seg()
 #  endif
-#  pragma section(".CRT$XLY",long,read)
-#endif
+#else
+
 JEMALLOC_SECTION(".CRT$XLY") JEMALLOC_ATTR(used)
 static BOOL	(WINAPI *const tls_callback)(HINSTANCE hinstDLL,
     DWORD fdwReason, LPVOID lpvReserved) = _tls_callback;
+#endif
 #endif
 
 #if (!defined(JEMALLOC_MALLOC_THREAD_CLEANUP) && !defined(JEMALLOC_TLS) && \
