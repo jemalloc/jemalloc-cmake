@@ -514,6 +514,15 @@ set(C_SRCS
 # The original library, delivery product
 set(LIBJEMALLOCLIB jemalloc${install_suffix})
 add_library(${LIBJEMALLOCLIB} ${C_SRCS})
+set_target_properties(${LIBJEMALLOCLIB}
+           PROPERTIES
+           CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_DEBUG
+           ${PROJECT_BINARY_DIR}/Debug
+           CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_RELEASE
+           ${PROJECT_BINARY_DIR}/Release
+           COMPILE_PDB_NAME 
+           ${LIBJEMALLOCLIB}
+)
 
 ##################################################################
 ## Building tests
