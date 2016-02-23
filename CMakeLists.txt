@@ -28,6 +28,8 @@
 #  without-export=1 - disable export of public APIs
 #  with-private-namespace=<additional_prefix>
 #  with-install-suffix=<suffix> added to public headers and the library
+#  with-malloc-conf=lg_chunk:18 Embed <malloc_conf> as a run-time options string that is processed prior to
+#       the malloc_conf global variable
 #  disable-cc-silence=1 disable compiler silencing code
 #  enable-debug=1 Enable debugging code
 #  enable-ivsalloc=1 Validate pub API pointers
@@ -88,6 +90,8 @@ CHECK_INCLUDE_FILES (sys/time.h HAVE_SYSTIME_H)
 UtilCheckTypeSize(void* SIZEOF_VOID_P)
 if(SIZEOF_VOID_P)
   lg(${SIZEOF_VOID_P} "LG_SIZEOF_PTR")
+  # The latest hardcodes Windows effetively disabling customization
+  set(LG_SIZEOF_PTR_WIN ${LG_SIZEOF_PTR})
   if((NOT ${LG_SIZEOF_PTR} EQUAL 3) AND
      (NOT ${LG_SIZEOF_PTR} EQUAL 2))
     message(FATAL_ERROR "Unsupported pointer size :${LG_SIZEOF_PTR}")
@@ -109,6 +113,15 @@ if(SIZEOF_LONG)
   if((NOT ${LG_SIZEOF_LONG} EQUAL 3) AND
      (NOT ${LG_SIZEOF_LONG} EQUAL 2))
     message(FATAL_ERROR "Unsupported long size :${LG_SIZEOF_LONG}")
+  endif()
+endif()
+
+UtilCheckTypeSize("long long" SIZEOF_LONG_LONG)
+if(SIZEOF_LONG_LONG)
+  lg(${SIZEOF_LONG_LONG} "LG_SIZEOF_LONG_LONG")
+  if((NOT ${LG_SIZEOF_LONG_LONG} EQUAL 3) AND
+     (NOT ${LG_SIZEOF_LONG_LONG} EQUAL 2))
+    message(FATAL_ERROR "Unsupported long size :${LG_SIZEOF_LONG_LONG}")
   endif()
 endif()
 
@@ -193,6 +206,13 @@ endif()
 
 set(private_namespace ${JEMALLOC_PRIVATE_NAMESPACE})
 
+# Default empty
+# Specify default malloc_conf
+set(JEMALLOC_CONFIG_MALLOC_CONF "\"\"")
+if(with-malloc-conf)
+    set(JEMALLOC_CONFIG_MALLOC_CONF ${with-malloc-conf})
+endif()
+
 if(with-install-suffix)
     set(INSTALL_SUFFIX ${with-install-suffix})
     set(install_suffix ${with-install-suffix})
@@ -267,6 +287,9 @@ endif()
 # ffsl and ffs are defined in msvc_compat/strings.h
 set(JEMALLOC_INTERNAL_FFSL ffsl)
 set(JEMALLOC_INTERNAL_FFS ffs)
+set(JEMALLOC_INTERNAL_FFSLL ffsll)
+
+# set(JEMALLOC_INTERNAL_FFSLL ffsll)
 
 # Base 2 log of minimum tiny size class to support
 set(LG_TINY_MIN 3)
@@ -484,6 +507,7 @@ if(NOT HAVE_INTTYPES_H)
 endif()
 
 set(C_SRCS
+  src/jemalloc.c
   src/arena.c
   src/atomic.c
   src/base.c
@@ -496,15 +520,17 @@ set(C_SRCS
   src/extent.c
   src/hash.c
   src/huge.c
-  src/jemalloc.c
   src/mb.c
   src/mutex.c
+  src/nstime.c
   src/pages.c
+  src/prng.c
   src/prof.c
   src/quarantine.c
   src/rtree.c
   src/stats.c
   src/tcache.c
+  src/ticker.c
   src/tsd.c
   src/util.c
   # src/valgrind.c # Valgrind integration only
@@ -589,6 +615,7 @@ set_target_properties(${C_TESTLIB_STRESS}
 )
 
 set(C_UTIL_INTEGRATION_SRCS
+    src/nstime.c
     src/util.c
 )
 
@@ -609,6 +636,7 @@ set(TESTS_UNIT
     test/unit/atomic.c
     test/unit/bitmap.c
     test/unit/ckh.c
+    test/unit/decay.c
     test/unit/hash.c
     test/unit/junk.c
     test/unit/junk_alloc.c
@@ -618,6 +646,7 @@ set(TESTS_UNIT
     test/unit/math.c
     test/unit/mq.c
     test/unit/mtx.c
+    test/unit/prng.c
     test/unit/prof_accum.c
     test/unit/prof_active.c
     test/unit/prof_gdump.c
@@ -631,7 +660,10 @@ set(TESTS_UNIT
     test/unit/rtree.c
     test/unit/SFMT.c
     test/unit/size_classes.c
+    test/unit/smoothstep.c
     test/unit/stats.c
+    test/unit/ticker.c
+    test/unit/nstime.c
     test/unit/tsd.c
     test/unit/util.c
     test/unit/zero.c

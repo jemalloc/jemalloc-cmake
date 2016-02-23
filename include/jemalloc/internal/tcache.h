@@ -83,7 +83,7 @@ struct tcache_bin_s {
 struct tcache_s {
 	ql_elm(tcache_t) link;		/* Used for aggregating stats. */
 	uint64_t	prof_accumbytes;/* Cleared after arena_prof_accum(). */
-	unsigned	ev_cnt;		/* Event count since incremental GC. */
+	ticker_t	gc_ticker;	/* Drives incremental GC. */
 	szind_t		next_gc_bin;	/* Next bin to GC. */
 	tcache_bin_t	tbins[1];	/* Dynamically sized. */
 	/*
@@ -247,9 +247,7 @@ tcache_event(tsd_t *tsd, tcache_t *tcache)
 	if (TCACHE_GC_INCR == 0)
 		return;
 
-	tcache->ev_cnt++;
-	assert(tcache->ev_cnt <= TCACHE_GC_INCR);
-	if (unlikely(tcache->ev_cnt == TCACHE_GC_INCR))
+	if (unlikely(ticker_tick(&tcache->gc_ticker)))
 		tcache_event_hard(tsd, tcache);
 }
 
@@ -363,7 +361,7 @@ tcache_alloc_large(tsd_t *tsd, arena_t *arena, tcache_t *tcache, size_t size,
 
 		usize = index2size(binind);
 		assert(usize <= tcache_maxclass);
-		ret = arena_malloc_large(arena, usize, binind, zero);
+		ret = arena_malloc_large(tsd, arena, usize, binind, zero);
 		if (ret == NULL)
 			return (NULL);
 	} else {

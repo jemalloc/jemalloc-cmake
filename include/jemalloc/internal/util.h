@@ -121,9 +121,12 @@ void	malloc_printf(const char *format, ...) JEMALLOC_FORMAT_PRINTF(1, 2);
 #ifdef JEMALLOC_H_INLINES
 
 #ifndef JEMALLOC_ENABLE_INLINE
+int	jemalloc_ffs64(uint64_t bitmap);
 int	jemalloc_ffsl(long bitmap);
 int	jemalloc_ffs(int bitmap);
-size_t	pow2_ceil(size_t x);
+uint64_t	pow2_ceil_u64(uint64_t x);
+uint32_t	pow2_ceil_u32(uint32_t x);
+size_t	pow2_ceil_zu(size_t x);
 size_t	lg_floor(size_t x);
 void	set_errno(int errnum);
 int	get_errno(void);
@@ -132,9 +135,23 @@ int	get_errno(void);
 #if (defined(JEMALLOC_ENABLE_INLINE) || defined(JEMALLOC_UTIL_C_))
 
 /* Sanity check. */
-#if !defined(JEMALLOC_INTERNAL_FFSL) || !defined(JEMALLOC_INTERNAL_FFS)
-#  error Both JEMALLOC_INTERNAL_FFSL && JEMALLOC_INTERNAL_FFS should have been defined by configure
+#if !defined(JEMALLOC_INTERNAL_FFSLL) || !defined(JEMALLOC_INTERNAL_FFSL) \
+    || !defined(JEMALLOC_INTERNAL_FFS)
+#  error JEMALLOC_INTERNAL_FFS{,L,LL} should have been defined by configure
 #endif
+
+JEMALLOC_ALWAYS_INLINE int
+jemalloc_ffs64(uint64_t bitmap)
+{
+
+#if LG_SIZEOF_LONG == 3
+	return (JEMALLOC_INTERNAL_FFSL(bitmap));
+#elif LG_SIZEOF_LONG_LONG == 3
+	return (JEMALLOC_INTERNAL_FFSLL(bitmap));
+#else
+#error No implementation for 64-bit ffs()
+#endif
+}
 
 JEMALLOC_ALWAYS_INLINE int
 jemalloc_ffsl(long bitmap)
@@ -150,9 +167,8 @@ jemalloc_ffs(int bitmap)
 	return (JEMALLOC_INTERNAL_FFS(bitmap));
 }
 
-/* Compute the smallest power of 2 that is >= x. */
-JEMALLOC_INLINE size_t
-pow2_ceil(size_t x)
+JEMALLOC_INLINE uint64_t
+pow2_ceil_u64(uint64_t x)
 {
 
 	x--;
@@ -161,11 +177,35 @@ pow2_ceil(size_t x)
 	x |= x >> 4;
 	x |= x >> 8;
 	x |= x >> 16;
-#if (LG_SIZEOF_PTR == 3)
 	x |= x >> 32;
-#endif
 	x++;
 	return (x);
+}
+
+JEMALLOC_INLINE uint32_t
+pow2_ceil_u32(uint32_t x)
+{
+
+	x--;
+	x |= x >> 1;
+	x |= x >> 2;
+	x |= x >> 4;
+	x |= x >> 8;
+	x |= x >> 16;
+	x++;
+	return (x);
+}
+
+/* Compute the smallest power of 2 that is >= x. */
+JEMALLOC_INLINE size_t
+pow2_ceil_zu(size_t x)
+{
+
+#if (LG_SIZEOF_PTR == 3)
+	return (pow2_ceil_u64(x));
+#else
+	return (pow2_ceil_u32(x));
+#endif
 }
 
 #if (defined(__i386__) || defined(__amd64__) || defined(__x86_64__))

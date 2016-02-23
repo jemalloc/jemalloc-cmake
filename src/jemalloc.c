@@ -516,74 +516,110 @@ arena_unbind(tsd_t *tsd, unsigned ind)
 	tsd_arena_set(tsd, NULL);
 }
 
-arena_t *
-arena_get_hard(tsd_t *tsd, unsigned ind, bool init_if_missing)
+arena_tdata_t *
+arena_tdata_get_hard(tsd_t *tsd, unsigned ind)
 {
-	arena_t *arena;
-	arena_t **arenas_cache = tsd_arenas_cache_get(tsd);
-	unsigned narenas_cache = tsd_narenas_cache_get(tsd);
+	arena_tdata_t *tdata, *arenas_tdata_old;
+	arena_tdata_t *arenas_tdata = tsd_arenas_tdata_get(tsd);
+	unsigned narenas_tdata_old, i;
+	unsigned narenas_tdata = tsd_narenas_tdata_get(tsd);
 	unsigned narenas_actual = narenas_total_get();
 
-	/* Deallocate old cache if it's too small. */
-	if (arenas_cache != NULL && narenas_cache < narenas_actual) {
-		a0dalloc(arenas_cache);
-		arenas_cache = NULL;
-		narenas_cache = 0;
-		tsd_arenas_cache_set(tsd, arenas_cache);
-		tsd_narenas_cache_set(tsd, narenas_cache);
+	/*
+	 * Dissociate old tdata array (and set up for deallocation upon return)
+	 * if it's too small.
+	 */
+	if (arenas_tdata != NULL && narenas_tdata < narenas_actual) {
+		arenas_tdata_old = arenas_tdata;
+		narenas_tdata_old = narenas_tdata;
+		arenas_tdata = NULL;
+		narenas_tdata = 0;
+		tsd_arenas_tdata_set(tsd, arenas_tdata);
+		tsd_narenas_tdata_set(tsd, narenas_tdata);
+	} else {
+		arenas_tdata_old = NULL;
+		narenas_tdata_old = 0;
 	}
 
-	/* Allocate cache if it's missing. */
-	if (arenas_cache == NULL) {
-		bool *arenas_cache_bypassp = tsd_arenas_cache_bypassp_get(tsd);
-		assert(ind < narenas_actual || !init_if_missing);
-		narenas_cache = (ind < narenas_actual) ? narenas_actual : ind+1;
+	/* Allocate tdata array if it's missing. */
+	if (arenas_tdata == NULL) {
+		bool *arenas_tdata_bypassp = tsd_arenas_tdata_bypassp_get(tsd);
+		narenas_tdata = (ind < narenas_actual) ? narenas_actual : ind+1;
 
-		if (tsd_nominal(tsd) && !*arenas_cache_bypassp) {
-			*arenas_cache_bypassp = true;
-			arenas_cache = (arena_t **)a0malloc(sizeof(arena_t *) *
-			    narenas_cache);
-			*arenas_cache_bypassp = false;
+		if (tsd_nominal(tsd) && !*arenas_tdata_bypassp) {
+			*arenas_tdata_bypassp = true;
+			arenas_tdata = (arena_tdata_t *)a0malloc(
+			    sizeof(arena_tdata_t) * narenas_tdata);
+			*arenas_tdata_bypassp = false;
 		}
-		if (arenas_cache == NULL) {
-			/*
-			 * This function must always tell the truth, even if
-			 * it's slow, so don't let OOM, thread cleanup (note
-			 * tsd_nominal check), nor recursive allocation
-			 * avoidance (note arenas_cache_bypass check) get in the
-			 * way.
-			 */
-			if (ind >= narenas_actual)
-				return (NULL);
-			malloc_mutex_lock(&arenas_lock);
-			arena = arenas[ind];
-			malloc_mutex_unlock(&arenas_lock);
-			return (arena);
+		if (arenas_tdata == NULL) {
+			tdata = NULL;
+			goto label_return;
 		}
-		assert(tsd_nominal(tsd) && !*arenas_cache_bypassp);
-		tsd_arenas_cache_set(tsd, arenas_cache);
-		tsd_narenas_cache_set(tsd, narenas_cache);
+		assert(tsd_nominal(tsd) && !*arenas_tdata_bypassp);
+		tsd_arenas_tdata_set(tsd, arenas_tdata);
+		tsd_narenas_tdata_set(tsd, narenas_tdata);
 	}
 
 	/*
-	 * Copy to cache.  It's possible that the actual number of arenas has
-	 * increased since narenas_total_get() was called above, but that causes
-	 * no correctness issues unless two threads concurrently execute the
-	 * arenas.extend mallctl, which we trust mallctl synchronization to
+	 * Copy to tdata array.  It's possible that the actual number of arenas
+	 * has increased since narenas_total_get() was called above, but that
+	 * causes no correctness issues unless two threads concurrently execute
+	 * the arenas.extend mallctl, which we trust mallctl synchronization to
 	 * prevent.
 	 */
 	malloc_mutex_lock(&arenas_lock);
-	memcpy(arenas_cache, arenas, sizeof(arena_t *) * narenas_actual);
+	for (i = 0; i < narenas_actual; i++)
+		arenas_tdata[i].arena = arenas[i];
 	malloc_mutex_unlock(&arenas_lock);
-	if (narenas_cache > narenas_actual) {
-		memset(&arenas_cache[narenas_actual], 0, sizeof(arena_t *) *
-		    (narenas_cache - narenas_actual));
+	if (narenas_tdata > narenas_actual) {
+		memset(&arenas_tdata[narenas_actual], 0, sizeof(arena_tdata_t)
+		    * (narenas_tdata - narenas_actual));
 	}
 
-	/* Read the refreshed cache, and init the arena if necessary. */
-	arena = arenas_cache[ind];
-	if (init_if_missing && arena == NULL)
-		arena = arenas_cache[ind] = arena_init(ind);
+	/* Copy/initialize tickers. */
+	for (i = 0; i < narenas_actual; i++) {
+		if (i < narenas_tdata_old) {
+			ticker_copy(&arenas_tdata[i].decay_ticker,
+			    &arenas_tdata_old[i].decay_ticker);
+		} else {
+			ticker_init(&arenas_tdata[i].decay_ticker,
+			    DECAY_NTICKS_PER_UPDATE);
+		}
+	}
+
+	/* Read the refreshed tdata array. */
+	tdata = &arenas_tdata[ind];
+label_return:
+	if (arenas_tdata_old != NULL)
+		a0dalloc(arenas_tdata_old);
+	return (tdata);
+}
+
+arena_t *
+arena_get_hard(tsd_t *tsd, unsigned ind, bool init_if_missing,
+    arena_tdata_t *tdata)
+{
+	arena_t *arena;
+	unsigned narenas_actual;
+
+	if (init_if_missing && tdata != NULL) {
+		tdata->arena = arena_init(ind);
+		if (tdata->arena != NULL)
+			return (tdata->arena);
+	}
+
+	/*
+	 * This function must always tell the truth, even if it's slow, so don't
+	 * let OOM, thread cleanup (note tsd_nominal check), nor recursive
+	 * allocation avoidance (note arenas_tdata_bypass check) get in the way.
+	 */
+	narenas_actual = narenas_total_get();
+	if (ind >= narenas_actual)
+		return (NULL);
+	malloc_mutex_lock(&arenas_lock);
+	arena = arenas[ind];
+	malloc_mutex_unlock(&arenas_lock);
 	return (arena);
 }
 
@@ -674,26 +710,26 @@ arena_cleanup(tsd_t *tsd)
 }
 
 void
-arenas_cache_cleanup(tsd_t *tsd)
+arenas_tdata_cleanup(tsd_t *tsd)
 {
-	arena_t **arenas_cache;
+	arena_tdata_t *arenas_tdata;
 
-	arenas_cache = tsd_arenas_cache_get(tsd);
-	if (arenas_cache != NULL) {
-		tsd_arenas_cache_set(tsd, NULL);
-		a0dalloc(arenas_cache);
+	arenas_tdata = tsd_arenas_tdata_get(tsd);
+	if (arenas_tdata != NULL) {
+		tsd_arenas_tdata_set(tsd, NULL);
+		a0dalloc(arenas_tdata);
 	}
 }
 
 void
-narenas_cache_cleanup(tsd_t *tsd)
+narenas_tdata_cleanup(tsd_t *tsd)
 {
 
 	/* Do nothing. */
 }
 
 void
-arenas_cache_bypass_cleanup(tsd_t *tsd)
+arenas_tdata_bypass_cleanup(tsd_t *tsd)
 {
 
 	/* Do nothing. */
@@ -902,10 +938,13 @@ malloc_conf_init(void)
 			opt_tcache = false;
 	}
 
-	for (i = 0; i < 3; i++) {
+	for (i = 0; i < 4; i++) {
 		/* Get runtime configuration. */
 		switch (i) {
 		case 0:
+			opts = config_malloc_conf;
+			break;
+		case 1:
 			if (je_malloc_conf != NULL) {
 				/*
 				 * Use options that were compiled into the
@@ -918,7 +957,7 @@ malloc_conf_init(void)
 				opts = buf;
 			}
 			break;
-		case 1: {
+		case 2: {
 			int linklen = 0;
 #ifndef _WIN32
 			int saved_errno = errno;
@@ -945,7 +984,7 @@ malloc_conf_init(void)
 			buf[linklen] = '\0';
 			opts = buf;
 			break;
-		} case 2: {
+		} case 3: {
 			const char *envname =
 #ifdef JEMALLOC_PREFIX
 			    JEMALLOC_CPREFIX"MALLOC_CONF"
@@ -1092,8 +1131,27 @@ malloc_conf_init(void)
 			}
 			CONF_HANDLE_SIZE_T(opt_narenas, "narenas", 1,
 			    SIZE_T_MAX, false)
+			if (strncmp("purge", k, klen) == 0) {
+				int i;
+				bool match = false;
+				for (i = 0; i < purge_mode_limit; i++) {
+					if (strncmp(purge_mode_names[i], v,
+					    vlen) == 0) {
+						opt_purge = (purge_mode_t)i;
+						match = true;
+						break;
+					}
+				}
+				if (!match) {
+					malloc_conf_error("Invalid conf value",
+					    k, klen, v, vlen);
+				}
+				continue;
+			}
 			CONF_HANDLE_SSIZE_T(opt_lg_dirty_mult, "lg_dirty_mult",
 			    -1, (sizeof(size_t) << 3) - 1)
+			CONF_HANDLE_SSIZE_T(opt_decay_time, "decay_time", -1,
+			    NSTIME_SEC_MAX);
 			CONF_HANDLE_BOOL(opt_stats_print, "stats_print", true)
 			if (config_fill) {
 				if (CONF_MATCH("junk")) {
@@ -2316,12 +2374,12 @@ label_oom:
 }
 
 JEMALLOC_ALWAYS_INLINE_C size_t
-ixallocx_helper(void *ptr, size_t old_usize, size_t size, size_t extra,
-    size_t alignment, bool zero)
+ixallocx_helper(tsd_t *tsd, void *ptr, size_t old_usize, size_t size,
+    size_t extra, size_t alignment, bool zero)
 {
 	size_t usize;
 
-	if (ixalloc(ptr, old_usize, size, extra, alignment, zero))
+	if (ixalloc(tsd, ptr, old_usize, size, extra, alignment, zero))
 		return (old_usize);
 	usize = isalloc(ptr, config_prof);
 
@@ -2329,14 +2387,15 @@ ixallocx_helper(void *ptr, size_t old_usize, size_t size, size_t extra,
 }
 
 static size_t
-ixallocx_prof_sample(void *ptr, size_t old_usize, size_t size, size_t extra,
-    size_t alignment, bool zero, prof_tctx_t *tctx)
+ixallocx_prof_sample(tsd_t *tsd, void *ptr, size_t old_usize, size_t size,
+    size_t extra, size_t alignment, bool zero, prof_tctx_t *tctx)
 {
 	size_t usize;
 
 	if (tctx == NULL)
 		return (old_usize);
-	usize = ixallocx_helper(ptr, old_usize, size, extra, alignment, zero);
+	usize = ixallocx_helper(tsd, ptr, old_usize, size, extra, alignment,
+	    zero);
 
 	return (usize);
 }
@@ -2362,11 +2421,11 @@ ixallocx_prof(tsd_t *tsd, void *ptr, size_t old_usize, size_t size,
 	assert(usize_max != 0);
 	tctx = prof_alloc_prep(tsd, usize_max, prof_active, false);
 	if (unlikely((uintptr_t)tctx != (uintptr_t)1U)) {
-		usize = ixallocx_prof_sample(ptr, old_usize, size, extra,
+		usize = ixallocx_prof_sample(tsd, ptr, old_usize, size, extra,
 		    alignment, zero, tctx);
 	} else {
-		usize = ixallocx_helper(ptr, old_usize, size, extra, alignment,
-		    zero);
+		usize = ixallocx_helper(tsd, ptr, old_usize, size, extra,
+		    alignment, zero);
 	}
 	if (usize == old_usize) {
 		prof_alloc_rollback(tsd, tctx, false);
@@ -2413,8 +2472,8 @@ je_xallocx(void *ptr, size_t size, size_t extra, int flags)
 		usize = ixallocx_prof(tsd, ptr, old_usize, size, extra,
 		    alignment, zero);
 	} else {
-		usize = ixallocx_helper(ptr, old_usize, size, extra, alignment,
-		    zero);
+		usize = ixallocx_helper(tsd, ptr, old_usize, size, extra,
+		    alignment, zero);
 	}
 	if (unlikely(usize == old_usize))
 		goto label_not_resized;
