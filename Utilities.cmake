@@ -684,3 +684,48 @@ if (GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
 endif()
 
 endfunction (GetAndParseVersion)
+
+#################################################################################
+## Compile a progam and collect page size output from the OUTPUT_VAR_NAME
+function (GetSystemPageSize OUTPUT_VAR_NAME)
+
+# Direct all the files into one folder
+set(WORK_FOLDER "${PROJECT_BINARY_DIR}/GetPageSize")
+file(MAKE_DIRECTORY ${WORK_FOLDER})
+
+set(SRC "${WORK_FOLDER}/getpagesize.c")
+set(COMPILE_OUTPUT_FILE "${WORK_FOLDER}/getpagesize.log")
+
+file(WRITE ${SRC}
+"#include <windows.h>\n"
+"#include <stdio.h>\n"
+"int main(int argc, const char** argv) {\n"
+"SYSTEM_INFO si;\n"
+"GetSystemInfo(&si);\n"
+"DWORD result = si.dwPageSize;\n"
+"printf(\"%lu\", result);\n"
+"return 0;\n"
+"}\n"
+)
+
+try_run(RUN_RESULT COMPILE_RESULT
+        "${WORK_FOLDER}"
+        "${SRC}"
+        COMPILE_OUTPUT_VARIABLE COMPILE_OUTPUT
+        RUN_OUTPUT_VARIABLE RUN_OUTPUT
+        )
+
+if(NOT COMPILE_RESULT)
+    file(WRITE ${COMPILE_OUTPUT_FILE} ${COMPILE_OUTPUT})
+    message(FATAL_ERROR "GetSystemPageSize failed compilation see ${COMPILE_OUTPUT_FILE}")
+endif()
+
+if("${RUN_RESULT}" STREQUAL "FAILED_TO_RUN")
+    message(FATAL_ERROR "GetSystemPageSize failed to run executable")
+endif()
+
+message(STATUS "System pages size ${RUN_OUTPUT}")
+
+set(${OUTPUT_VAR_NAME} ${RUN_OUTPUT} PARENT_SCOPE)
+
+endfunction (GetSystemPageSize)

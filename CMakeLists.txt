@@ -307,17 +307,16 @@ if(with-lg-quantum)
 endif()
 
 # Base 2 log of system page size
-# Assume default is 4096
-set(SYSTEM_PAGE_SIZE 4096)
-lg(${SYSTEM_PAGE_SIZE} "LG_PAGE")
+
 if(with-lg-page)
   set(LG_PAGE ${with-lg-page})
 endif()
 
-## TODO Figure out system page size
-#if(${LG_PAGE} STREQUAL "detect")
-  
-#endif()
+if(NOT LG_PAGE OR
+   "${LG_PAGE}" STREQUAL "detect")
+    GetSystemPageSize("SYSTEM_PAGE_SIZE")
+    lg(${SYSTEM_PAGE_SIZE} "LG_PAGE")
+endif()
 
 # Base 2 logs of system page sizes to support
 set (LG_PAGE_SIZES ${LG_PAGE})
