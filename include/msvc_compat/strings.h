@@ -21,6 +21,10 @@ static __forceinline int ffs(int x)
 	return (ffsl(x));
 }
 
+#  ifdef  _M_X64 
+#    pragma intrinsic(_BitScanForward64)
+#  endif
+
 static __forceinline int ffsll(unsigned __int64 x)
 {
 	unsigned long i;
@@ -31,17 +35,17 @@ static __forceinline int ffsll(unsigned __int64 x)
 #else
 // Fallback for 32-bit build where 64-bit version not available
 // assuming little endian
-    union {
-        unsigned __int64 ll;
-        unsigned   long l[2];
-    } s;
+	union {
+		unsigned __int64 ll;
+		unsigned   long l[2];
+	} s;
 
 	s.ll = x;
 
 	if (_BitScanForward(&i, s.l[0]))
 		return (i + 1);
 	else if(_BitScanForward(&i, s.l[1]))
-		return (i + 32);
+		return (i + 33);
 	return (0);
 #endif
 }
