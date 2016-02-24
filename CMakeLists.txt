@@ -398,14 +398,10 @@ set(PUBLIC_SYM
 set(PUBLIC_SYM_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/public_symbols.txt")
 GeneratePublicSymbolsList("${PUBLIC_SYM}" "${MANGLING_MAP}" ${JEMALLOC_PREFIX}  "${PUBLIC_SYM_FILE}")
 
-foreach(public_in jemalloc_defs.h jemalloc_protos.h jemalloc_typedefs.h)
+foreach(public_in jemalloc_macros.h jemalloc_defs.h jemalloc_protos.h jemalloc_typedefs.h)
   ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}" True)
 endforeach(public_in)  
-
-# Cmake chokes on a #define with a line continuation in jemalloc_macros.h.in
-ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_macros.h" False)
 
 set(JEMALLOC_RENAME "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_rename.h")
 GenerateJemallocRename("${PUBLIC_SYM_FILE}" ${JEMALLOC_RENAME})
@@ -448,21 +444,22 @@ PrivateNamespace("${PRIVATE_SYM_FILE}" "${PRIVATE_NAMESPACE_FILE}")
 set(PRIVATE_UNNAMESPACE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/private_unnamespace.h")
 PrivateUnnamespace("${PRIVATE_SYM_FILE}" "${PRIVATE_UNNAMESPACE_FILE}")
 
-# Configure internal
-# Chokes on line continuation so we only do @@ replacement which is required
+# Configure internal headers
+
+# Main internal header does not require #define expansion otherwise it affects real #undefs
 ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h.in"
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h"  False)
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h" False)
 
-ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal_defs.h" True)
+foreach(internal_in jemalloc_internal_defs.h)
+  ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/${internal_in}.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/${internal_in}" True)
+endforeach(internal_in)  
 
-# Test related
-ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h" True)
-
-# Line continuations are a problem for configuring defines but not required here
-ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h" False)
+# Test related headers
+foreach(test_in jemalloc_test_defs.h jemalloc_test.h)
+  ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/${test_in}.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/${test_in}" True)
+endforeach(test_in)  
 
 set(SIZE_CLASSES_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size_classes.h")
 SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"

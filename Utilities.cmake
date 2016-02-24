@@ -602,27 +602,34 @@ endfunction(PrivateUnnamespace)
 # lines that start with #undef DEFINE into what is defined in CMAKE
 function (ConfigureFile file_path output_path ExpandDefine)
 
+# Use Powershell to convert autoconf file to a cmake conf file
+# and see if that fixes the issue of line continuations and ; in the file
+# PS Snipper
+file(TO_NATIVE_PATH "${file_path}" ntv_file_path)
+
+# This converts #undefs into #cmakedefines so configure_file can handle it
+set(PS_CMD
+"Get-Content ${ntv_file_path} |
+ForEach { 
+if($_ -match '^#undef[ \t]*[^ \t]*')
+  { $_ -replace '^#undef[ \t]*([^ \t]*)','#cmakedefine $1 @$1@' } else {$_}}"
+)
+
 if(EXISTS ${file_path})
   if(NOT ${ExpandDefine})
-    # Will expand only @@ macros
     configure_file(${file_path} ${output_path} @ONLY NEWLINE_STYLE WIN32) 
   else()
-    # Need to Grep for ^#undef VAR lines and replace it with
-    # ^#cmakedefine VAR
     file(REMOVE ${file_path}.cmake)
-    file(STRINGS ${file_path} INPUT_STRINGS)
-    foreach(line ${INPUT_STRINGS})
-      if(${line} MATCHES "^#undef[ \t]*[^ \t]*")
-        string(REGEX REPLACE "^#undef[ \t]*([^ \t]*)" "\\1" extracted_define ${line})      
-        if(${extracted_define})
-          file(APPEND ${file_path}.cmake "#define ${extracted_define} ${${extracted_define}}\n")
-        else()
-          file(APPEND ${file_path}.cmake "/* #undef ${extracted_define} */\n\n")
-        endif()
-      else()
-        file(APPEND ${file_path}.cmake "${line}\n")
-      endif()
-    endforeach(line)
+    # Convert autoconf .in into a cmake .in
+    execute_process(COMMAND powershell -Command "${PS_CMD}" 
+        RESULT_VARIABLE error_level
+        ERROR_VARIABLE error_output
+        OUTPUT_FILE ${file_path}.cmake)
+        
+    if(NOT ${error_level} EQUAL 0)
+        message(FATAL_ERROR "Powershell completed with ${error_level} : ${error_output}")
+    endif()
+
     configure_file(${file_path}.cmake ${output_path} @ONLY NEWLINE_STYLE WIN32)
     file(REMOVE ${file_path}.cmake)
   endif()
