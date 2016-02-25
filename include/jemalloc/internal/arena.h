@@ -167,15 +167,14 @@ struct arena_chunk_map_misc_s {
 
 		/* Profile counters, used for large object runs. */
 		union {
-			void				*prof_tctx_pun;
-			prof_tctx_t			*prof_tctx;
+			void			*prof_tctx_pun;
+			prof_tctx_t		*prof_tctx;
 		};
 
 		/* Small region run metadata. */
 		arena_run_t			run;
 	};
 };
-typedef rb_tree(arena_chunk_map_misc_t) arena_avail_tree_t;
 typedef rb_tree(arena_chunk_map_misc_t) arena_run_tree_t;
 #endif /* JEMALLOC_ARENA_STRUCTS_A */
 
@@ -233,28 +232,28 @@ struct arena_chunk_s {
  */
 struct arena_bin_info_s {
 	/* Size of regions in a run for this bin's size class. */
-	size_t		reg_size;
+	size_t			reg_size;
 
 	/* Redzone size. */
-	size_t		redzone_size;
+	size_t			redzone_size;
 
 	/* Interval between regions (reg_size + (redzone_size << 1)). */
-	size_t		reg_interval;
+	size_t			reg_interval;
 
 	/* Total size of a run for this bin's size class. */
-	size_t		run_size;
+	size_t			run_size;
 
 	/* Total number of regions in a run for this bin's size class. */
-	uint32_t	nregs;
+	uint32_t		nregs;
 
 	/*
 	 * Metadata used to manipulate bitmaps for runs associated with this
 	 * bin.
 	 */
-	bitmap_info_t	bitmap_info;
+	bitmap_info_t		bitmap_info;
 
 	/* Offset of first region in a run for this bin's size class. */
-	uint32_t	reg0_offset;
+	uint32_t		reg0_offset;
 };
 
 struct arena_bin_s {
@@ -264,13 +263,13 @@ struct arena_bin_s {
 	 * which may be acquired while holding one or more bin locks, but not
 	 * vise versa.
 	 */
-	malloc_mutex_t	lock;
+	malloc_mutex_t		lock;
 
 	/*
 	 * Current run being used to service allocations of this bin's size
 	 * class.
 	 */
-	arena_run_t	*runcur;
+	arena_run_t		*runcur;
 
 	/*
 	 * Tree of non-full runs.  This tree is used when looking for an
@@ -279,10 +278,10 @@ struct arena_bin_s {
 	 * objects packed well, and it can also help reduce the number of
 	 * almost-empty chunks.
 	 */
-	arena_run_tree_t runs;
+	arena_run_tree_t	runs;
 
 	/* Bin statistics. */
-	malloc_bin_stats_t stats;
+	malloc_bin_stats_t	stats;
 };
 
 struct arena_s {
@@ -291,14 +290,14 @@ struct arena_s {
 
 	/*
 	 * Number of threads currently assigned to this arena.  This field is
-	 * protected by arenas_lock.
+	 * synchronized via atomic operations.
 	 */
 	unsigned		nthreads;
 
 	/*
 	 * There are three classes of arena operations from a locking
 	 * perspective:
-	 * 1) Thread assignment (modifies nthreads) is protected by arenas_lock.
+	 * 1) Thread assignment (modifies nthreads) is synchronized via atomics.
 	 * 2) Bin-related operations are protected by bin locks.
 	 * 3) Chunk- and run-related operations are protected by this mutex.
 	 */
@@ -350,12 +349,6 @@ struct arena_s {
 	 * memory is mapped for each arena.
 	 */
 	size_t			ndirty;
-
-	/*
-	 * Size/address-ordered tree of this arena's available runs.  The tree
-	 * is used for first-best-fit run allocation.
-	 */
-	arena_avail_tree_t	runs_avail;
 
 	/*
 	 * Unused dirty memory this arena manages.  Dirty memory is conceptually
@@ -462,11 +455,16 @@ struct arena_s {
 
 	/* bins is used to store trees of free regions. */
 	arena_bin_t		bins[NBINS];
+
+	/*
+	 * Quantized address-ordered trees of this arena's available runs.  The
+	 * trees are used for first-best-fit run allocation.
+	 */
+	arena_run_tree_t	runs_avail[1]; /* Dynamically sized. */
 };
 
 /* Used in conjunction with tsd for fast arena-related context lookup. */
 struct arena_tdata_s {
-	arena_t			*arena;
 	ticker_t		decay_ticker;
 };
 #endif /* JEMALLOC_ARENA_STRUCTS_B */
@@ -494,9 +492,15 @@ extern size_t		map_bias; /* Number of arena chunk header pages. */
 extern size_t		map_misc_offset;
 extern size_t		arena_maxrun; /* Max run size for arenas. */
 extern size_t		large_maxclass; /* Max large size class. */
+extern size_t		run_quantize_max; /* Max run_quantize_*() input. */
 extern unsigned		nlclasses; /* Number of large size classes. */
 extern unsigned		nhclasses; /* Number of huge size classes. */
 
+#ifdef JEMALLOC_JET
+typedef size_t (run_quantize_t)(size_t);
+extern run_quantize_t *run_quantize_floor;
+extern run_quantize_t *run_quantize_ceil;
+#endif
 void	arena_chunk_cache_maybe_insert(arena_t *arena, extent_node_t *node,
     bool cache);
 void	arena_chunk_cache_maybe_remove(arena_t *arena, extent_node_t *node,
@@ -573,6 +577,9 @@ void	arena_stats_merge(arena_t *arena, const char **dss,
     ssize_t *lg_dirty_mult, ssize_t *decay_time, size_t *nactive,
     size_t *ndirty, arena_stats_t *astats, malloc_bin_stats_t *bstats,
     malloc_large_stats_t *lstats, malloc_huge_stats_t *hstats);
+unsigned	arena_nthreads_get(arena_t *arena);
+void	arena_nthreads_inc(arena_t *arena);
+void	arena_nthreads_dec(arena_t *arena);
 arena_t	*arena_new(unsigned ind);
 bool	arena_boot(void);
 void	arena_prefork(arena_t *arena);
@@ -1048,7 +1055,7 @@ arena_ptr_small_binind_get(const void *ptr, size_t mapbits)
 		run = &miscelm->run;
 		run_binind = run->binind;
 		bin = &arena->bins[run_binind];
-		actual_binind = bin - arena->bins;
+		actual_binind = (szind_t)(bin - arena->bins);
 		assert(run_binind == actual_binind);
 		bin_info = &arena_bin_info[actual_binind];
 		rpages = arena_miscelm_to_rpages(miscelm);
@@ -1065,7 +1072,7 @@ arena_ptr_small_binind_get(const void *ptr, size_t mapbits)
 JEMALLOC_INLINE szind_t
 arena_bin_index(arena_t *arena, arena_bin_t *bin)
 {
-	szind_t binind = bin - arena->bins;
+	szind_t binind = (szind_t)(bin - arena->bins);
 	assert(binind < NBINS);
 	return (binind);
 }
@@ -1094,7 +1101,7 @@ arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info, const void *ptr)
 
 	/* Rescale (factor powers of 2 out of the numerator and denominator). */
 	interval = bin_info->reg_interval;
-	shift = jemalloc_ffs(interval) - 1;
+	shift = ffs_zu(interval) - 1;
 	diff >>= shift;
 	interval >>= shift;
 

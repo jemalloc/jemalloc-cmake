@@ -189,8 +189,8 @@
 #undef JEMALLOC_TLS
 
 /*
- * ffs*() functions to use for bitmapping.  Don't use these directly instead,
- * use jemalloc_ffs*() from util.h.
+ * ffs*() functions to use for bitmapping.  Don't use these directly; instead,
+ * use ffs_*() from util.h.
  */
 #undef JEMALLOC_INTERNAL_FFSLL
 #undef JEMALLOC_INTERNAL_FFSL

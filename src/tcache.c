@@ -10,7 +10,7 @@ ssize_t	opt_lg_tcache_max = LG_TCACHE_MAXCLASS_DEFAULT;
 tcache_bin_info_t	*tcache_bin_info;
 static unsigned		stack_nelms; /* Total stack elms per tcache. */
 
-size_t			nhbins;
+unsigned		nhbins;
 size_t			tcache_maxclass;
 
 tcaches_t		*tcaches;
@@ -325,7 +325,8 @@ tcache_create(tsd_t *tsd, arena_t *arena)
 	/* Avoid false cacheline sharing. */
 	size = sa2u(size, CACHELINE);
 
-	tcache = ipallocztm(tsd, size, CACHELINE, true, false, true, a0get());
+	tcache = ipallocztm(tsd, size, CACHELINE, true, false, true,
+	    arena_get(0, false));
 	if (tcache == NULL)
 		return (NULL);
 
@@ -453,7 +454,7 @@ tcaches_create(tsd_t *tsd, unsigned *r_ind)
 
 	if (tcaches_avail == NULL && tcaches_past > MALLOCX_TCACHE_MAX)
 		return (true);
-	tcache = tcache_create(tsd, a0get());
+	tcache = tcache_create(tsd, arena_get(0, false));
 	if (tcache == NULL)
 		return (true);
 
@@ -461,7 +462,7 @@ tcaches_create(tsd_t *tsd, unsigned *r_ind)
 		elm = tcaches_avail;
 		tcaches_avail = tcaches_avail->next;
 		elm->tcache = tcache;
-		*r_ind = elm - tcaches;
+		*r_ind = (unsigned)(elm - tcaches);
 	} else {
 		elm = &tcaches[tcaches_past];
 		elm->tcache = tcache;

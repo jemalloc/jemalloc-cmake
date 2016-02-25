@@ -350,12 +350,9 @@ chunk_alloc_core(arena_t *arena, void *new_addr, size_t size, size_t alignment,
 	    chunk_alloc_dss(arena, new_addr, size, alignment, zero, commit)) !=
 	    NULL)
 		return (ret);
-	/*
-	 * mmap.  Requesting an address is not implemented for
-	 * chunk_alloc_mmap(), so only call it if (new_addr == NULL).
-	 */
-	if (new_addr == NULL && (ret = chunk_alloc_mmap(size, alignment, zero,
-	    commit)) != NULL)
+	/* mmap. */
+	if ((ret = chunk_alloc_mmap(new_addr, size, alignment, zero, commit)) !=
+	    NULL)
 		return (ret);
 	/* "secondary" dss. */
 	if (have_dss && dss_prec == dss_prec_secondary && (ret =
@@ -380,7 +377,7 @@ chunk_alloc_base(size_t size)
 	 */
 	zero = true;
 	commit = true;
-	ret = chunk_alloc_mmap(size, chunksize, &zero, &commit);
+	ret = chunk_alloc_mmap(NULL, size, chunksize, &zero, &commit);
 	if (ret == NULL)
 		return (NULL);
 	if (config_valgrind)
@@ -418,9 +415,7 @@ chunk_arena_get(unsigned arena_ind)
 {
 	arena_t *arena;
 
-	/* Dodge tsd for a0 in order to avoid bootstrapping issues. */
-	arena = (arena_ind == 0) ? a0get() : arena_get(tsd_fetch(), arena_ind,
-	     false, true);
+	arena = arena_get(arena_ind, false);
 	/*
 	 * The arena we're allocating on behalf of must have been initialized
 	 * already.
@@ -716,7 +711,7 @@ chunk_boot(void)
 	 * so pages_map will always take fast path.
 	 */
 	if (!opt_lg_chunk) {
-		opt_lg_chunk = jemalloc_ffs((int)info.dwAllocationGranularity)
+		opt_lg_chunk = ffs_u((unsigned)info.dwAllocationGranularity)
 		    - 1;
 	}
 #else
@@ -732,8 +727,8 @@ chunk_boot(void)
 
 	if (have_dss && chunk_dss_boot())
 		return (true);
-	if (rtree_new(&chunks_rtree, (ZU(1) << (LG_SIZEOF_PTR+3)) -
-	    opt_lg_chunk, chunks_rtree_node_alloc, NULL))
+	if (rtree_new(&chunks_rtree, (unsigned)((ZU(1) << (LG_SIZEOF_PTR+3)) -
+	    opt_lg_chunk), chunks_rtree_node_alloc, NULL))
 		return (true);
 
 	return (false);

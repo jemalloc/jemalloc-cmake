@@ -1,5 +1,4 @@
 a0dalloc
-a0get
 a0malloc
 arena_aalloc
 arena_alloc_junk_small
@@ -34,7 +33,6 @@ arena_decay_ticks
 arena_dss_prec_get
 arena_dss_prec_set
 arena_get
-arena_get_hard
 arena_init
 arena_lg_dirty_mult_default_get
 arena_lg_dirty_mult_default_set
@@ -73,10 +71,12 @@ arena_migrate
 arena_miscelm_get
 arena_miscelm_to_pageind
 arena_miscelm_to_rpages
-arena_nbound
 arena_new
 arena_node_alloc
 arena_node_dalloc
+arena_nthreads_dec
+arena_nthreads_get
+arena_nthreads_inc
 arena_palloc
 arena_postfork_child
 arena_postfork_parent
@@ -106,6 +106,7 @@ arena_stats_merge
 arena_tcache_fill_small
 arena_tdata_get
 arena_tdata_get_hard
+arenas
 atomic_add_p
 atomic_add_u
 atomic_add_uint32
@@ -243,6 +244,12 @@ extent_tree_szad_reverse_iter
 extent_tree_szad_reverse_iter_recurse
 extent_tree_szad_reverse_iter_start
 extent_tree_szad_search
+ffs_llu
+ffs_lu
+ffs_u
+ffs_u32
+ffs_u64
+ffs_zu
 get_errno
 hash
 hash_fmix_32
@@ -292,9 +299,6 @@ isqalloc
 isthreaded
 ivsalloc
 ixalloc
-jemalloc_ffs
-jemalloc_ffs64
-jemalloc_ffsl
 jemalloc_postfork_child
 jemalloc_postfork_parent
 jemalloc_prefork
@@ -445,6 +449,9 @@ rtree_subtree_read_hard
 rtree_subtree_tryread
 rtree_val_read
 rtree_val_write
+run_quantize_ceil
+run_quantize_floor
+run_quantize_max
 s2u
 s2u_compute
 s2u_lookup

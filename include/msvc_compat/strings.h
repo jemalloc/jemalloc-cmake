@@ -21,14 +21,14 @@ static __forceinline int ffs(int x)
 	return (ffsl(x));
 }
 
-#  ifdef  _M_X64 
+#  ifdef  _M_X64
 #    pragma intrinsic(_BitScanForward64)
 #  endif
 
 static __forceinline int ffsll(unsigned __int64 x)
 {
 	unsigned long i;
-#ifdef  _M_X64 
+#ifdef  _M_X64
 	if (_BitScanForward64(&i, x))
 		return (i + 1);
 	return (0);

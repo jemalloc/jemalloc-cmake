@@ -654,6 +654,7 @@ set(TESTS_UNIT
     test/unit/quarantine.c
     test/unit/rb.c
     test/unit/rtree.c
+    test/unit/run_quantize.c
     test/unit/SFMT.c
     test/unit/size_classes.c
     test/unit/smoothstep.c
