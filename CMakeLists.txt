@@ -42,7 +42,7 @@
 #  with-lg-quantum=<lg2 of the min allocation alignment>
 #  with-lg-page=<lg2 of the page size> override system page size
 #  with-lg-page-sizes=<comma separated list of lg2 pages sizes> Base 2 logs of system page sizes to support
-#  with_lg_size_class_group=<Base 2 log of size classes per doubling> default 2
+#  with-lg_size-class-group=<Base 2 log of size classes per doubling> default 2
 #  NOT SUPPORTED enable-lazy-lock
 #  
 
@@ -137,10 +137,6 @@ endif()
 
 set (CPU_SPINWAIT "YieldProcessor()")
 
-# Not clear if we need this
-set(so "dll")
-set(importlib "lib")
-
 # If defined, use munmap() to unmap freed chunks, rather than storing them for
 # later reuse.  This is disabled by default on Linux because common sequences
 # of mmap()/munmap() calls will cause virtual memory map holes.
@@ -210,7 +206,7 @@ set(private_namespace ${JEMALLOC_PRIVATE_NAMESPACE})
 # Specify default malloc_conf
 set(JEMALLOC_CONFIG_MALLOC_CONF "\"\"")
 if(with-malloc-conf)
-    set(JEMALLOC_CONFIG_MALLOC_CONF ${with-malloc-conf})
+    set(JEMALLOC_CONFIG_MALLOC_CONF "\"${with-malloc-conf}\"")
 endif()
 
 if(with-install-suffix)
@@ -289,8 +285,6 @@ set(JEMALLOC_INTERNAL_FFSL ffsl)
 set(JEMALLOC_INTERNAL_FFS ffs)
 set(JEMALLOC_INTERNAL_FFSLL ffsll)
 
-# set(JEMALLOC_INTERNAL_FFSLL ffsll)
-
 # Base 2 log of minimum tiny size class to support
 set(LG_TINY_MIN 3)
 if(with-lg-tiny-min)
@@ -326,8 +320,8 @@ endif()
 
 # Base 2 log of size classes per doubling
 set (LG_SIZE_CLASS_GROUP 2)
-if(with_lg_size_class_group)
-  set (LG_SIZE_CLASS_GROUP ${with_lg_size_class_group})
+if(with-lg-size-class-group)
+  set (LG_SIZE_CLASS_GROUP ${with-lg-size-class-group})
 endif()
 
 # secure_getenv
