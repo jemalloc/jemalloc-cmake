@@ -181,15 +181,16 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
 
   # All remaining groups.
   math(EXPR lg_grp "${lg_grp} + ${lg_g}")
-  while(${lg_grp} LESS ${ptr_bits})
+  math(EXPR ptr_bits_min1 "${ptr_bits} - 1")
+  math(EXPR ptr_bits_min2 "${ptr_bits} - 2")
+  while(${lg_grp} LESS ${ptr_bits_min1})
 
     file(APPEND "${output_file}"
     "                                         \\\n"
     )
     set(ndelta 1)
 
-    math(EXPR ptr_bits_min1 "${ptr_bits} - 1")
-    if(${lg_grp} EQUAL ${ptr_bits_min1})
+    if(${lg_grp} EQUAL ${ptr_bits_min2})
       math(EXPR ndelta_limit "${g} - 1")
     else()
       set(ndelta_limit ${g})
@@ -223,7 +224,7 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
           
     math(EXPR lg_grp "${lg_grp} + 1")
     math(EXPR lg_delta "${lg_delta} + 1")
-  endwhile(${lg_grp} LESS ${ptr_bits})
+  endwhile(${lg_grp} LESS ${ptr_bits_min1})
   
   file(APPEND "${output_file}" "\n")
   set(nsizes ${index})

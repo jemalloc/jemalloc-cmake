@@ -536,8 +536,7 @@ extern arena_dalloc_junk_small_t *arena_dalloc_junk_small;
 void	arena_dalloc_junk_small(void *ptr, arena_bin_info_t *bin_info);
 #endif
 void	arena_quarantine_junk_small(void *ptr, size_t usize);
-void	*arena_malloc_large(tsd_t *tsd, arena_t *arena, size_t size,
-    szind_t ind, bool zero);
+void	*arena_malloc_large(tsd_t *tsd, arena_t *arena, szind_t ind, bool zero);
 void	*arena_malloc_hard(tsd_t *tsd, arena_t *arena, size_t size, szind_t ind,
     bool zero, tcache_t *tcache);
 void	*arena_palloc(tsd_t *tsd, arena_t *arena, size_t usize,
@@ -573,7 +572,10 @@ ssize_t	arena_lg_dirty_mult_default_get(void);
 bool	arena_lg_dirty_mult_default_set(ssize_t lg_dirty_mult);
 ssize_t	arena_decay_time_default_get(void);
 bool	arena_decay_time_default_set(ssize_t decay_time);
-void	arena_stats_merge(arena_t *arena, const char **dss,
+void	arena_basic_stats_merge(arena_t *arena, unsigned *nthreads,
+    const char **dss, ssize_t *lg_dirty_mult, ssize_t *decay_time,
+    size_t *nactive, size_t *ndirty);
+void	arena_stats_merge(arena_t *arena, unsigned *nthreads, const char **dss,
     ssize_t *lg_dirty_mult, ssize_t *decay_time, size_t *nactive,
     size_t *ndirty, arena_stats_t *astats, malloc_bin_stats_t *bstats,
     malloc_large_stats_t *lstats, malloc_huge_stats_t *hstats);
@@ -635,7 +637,7 @@ bool	arena_prof_accum_locked(arena_t *arena, uint64_t accumbytes);
 bool	arena_prof_accum(arena_t *arena, uint64_t accumbytes);
 szind_t	arena_ptr_small_binind_get(const void *ptr, size_t mapbits);
 szind_t	arena_bin_index(arena_t *arena, arena_bin_t *bin);
-unsigned	arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info,
+size_t	arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info,
     const void *ptr);
 prof_tctx_t	*arena_prof_tctx_get(const void *ptr);
 void	arena_prof_tctx_set(const void *ptr, size_t usize, prof_tctx_t *tctx);
@@ -1077,11 +1079,10 @@ arena_bin_index(arena_t *arena, arena_bin_t *bin)
 	return (binind);
 }
 
-JEMALLOC_INLINE unsigned
+JEMALLOC_INLINE size_t
 arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info, const void *ptr)
 {
-	unsigned shift, diff, regind;
-	size_t interval;
+	size_t diff, interval, shift, regind;
 	arena_chunk_map_misc_t *miscelm = arena_run_to_miscelm(run);
 	void *rpages = arena_miscelm_to_rpages(miscelm);
 
@@ -1096,7 +1097,7 @@ arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info, const void *ptr)
 	 * Avoid doing division with a variable divisor if possible.  Using
 	 * actual division here can reduce allocator throughput by over 20%!
 	 */
-	diff = (unsigned)((uintptr_t)ptr - (uintptr_t)rpages -
+	diff = (size_t)((uintptr_t)ptr - (uintptr_t)rpages -
 	    bin_info->reg0_offset);
 
 	/* Rescale (factor powers of 2 out of the numerator and denominator). */
@@ -1123,9 +1124,9 @@ arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info, const void *ptr)
 		 * divide by 0, and 1 and 2 are both powers of two, which are
 		 * handled above.
 		 */
-#define	SIZE_INV_SHIFT	((sizeof(unsigned) << 3) - LG_RUN_MAXREGS)
-#define	SIZE_INV(s)	(((1U << SIZE_INV_SHIFT) / (s)) + 1)
-		static const unsigned interval_invs[] = {
+#define	SIZE_INV_SHIFT	((sizeof(size_t) << 3) - LG_RUN_MAXREGS)
+#define	SIZE_INV(s)	(((ZU(1) << SIZE_INV_SHIFT) / (s)) + 1)
+		static const size_t interval_invs[] = {
 		    SIZE_INV(3),
 		    SIZE_INV(4), SIZE_INV(5), SIZE_INV(6), SIZE_INV(7),
 		    SIZE_INV(8), SIZE_INV(9), SIZE_INV(10), SIZE_INV(11),
@@ -1136,8 +1137,8 @@ arena_run_regind(arena_run_t *run, arena_bin_info_t *bin_info, const void *ptr)
 		    SIZE_INV(28), SIZE_INV(29), SIZE_INV(30), SIZE_INV(31)
 		};
 
-		if (likely(interval <= ((sizeof(interval_invs) /
-		    sizeof(unsigned)) + 2))) {
+		if (likely(interval <= ((sizeof(interval_invs) / sizeof(size_t))
+		    + 2))) {
 			regind = (diff * interval_invs[interval - 3]) >>
 			    SIZE_INV_SHIFT;
 		} else

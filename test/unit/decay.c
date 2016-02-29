@@ -160,7 +160,7 @@ TEST_BEGIN(test_decay_ticks)
 	 * Test tcache fill/flush interactions for large and small size classes,
 	 * using an explicit tcache.
 	 */
-	{
+	if (config_tcache) {
 		unsigned tcache_ind, i;
 		size_t tcache_sizes[2];
 		tcache_sizes[0] = large0;
@@ -201,8 +201,10 @@ TEST_BEGIN(test_decay_ticker)
 #define	NPS 1024
 	int flags = (MALLOCX_ARENA(0) | MALLOCX_TCACHE_NONE);
 	void *ps[NPS];
-	uint64_t epoch, npurge0, npurge1;
-	size_t sz, tcache_max, large;
+	uint64_t epoch;
+	uint64_t npurge0 = 0;
+	uint64_t npurge1 = 0;
+	size_t sz, large;
 	unsigned i, nupdates0;
 	nstime_t time, decay_time, deadline;
 
@@ -214,18 +216,26 @@ TEST_BEGIN(test_decay_ticker)
 	 * verify the ticker triggers purging.
 	 */
 
-	sz = sizeof(size_t);
-	assert_d_eq(mallctl("arenas.tcache_max", &tcache_max, &sz, NULL, 0), 0,
-	    "Unexpected mallctl failure");
-	large = nallocx(tcache_max + 1, flags);
+	if (config_tcache) {
+		size_t tcache_max;
+
+		sz = sizeof(size_t);
+		assert_d_eq(mallctl("arenas.tcache_max", &tcache_max, &sz, NULL,
+		    0), 0, "Unexpected mallctl failure");
+		large = nallocx(tcache_max + 1, flags);
+	}  else {
+		sz = sizeof(size_t);
+		assert_d_eq(mallctl("arenas.lrun.0.size", &large, &sz, NULL, 0),
+		    0, "Unexpected mallctl failure");
+	}
 
 	assert_d_eq(mallctl("arena.0.purge", NULL, NULL, NULL, 0), 0,
 	    "Unexpected mallctl failure");
 	assert_d_eq(mallctl("epoch", NULL, NULL, &epoch, sizeof(uint64_t)), 0,
 	    "Unexpected mallctl failure");
 	sz = sizeof(uint64_t);
-	assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge0, &sz, NULL, 0), 0,
-	    "Unexpected mallctl failure");
+	assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge0, &sz, NULL, 0),
+	    config_stats ? 0 : ENOENT, "Unexpected mallctl result");
 
 	for (i = 0; i < NPS; i++) {
 		ps[i] = mallocx(large, flags);
@@ -266,12 +276,14 @@ TEST_BEGIN(test_decay_ticker)
 		    sizeof(uint64_t)), 0, "Unexpected mallctl failure");
 		sz = sizeof(uint64_t);
 		assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge1, &sz,
-		    NULL, 0), 0, "Unexpected mallctl failure");
+		    NULL, 0), config_stats ? 0 : ENOENT,
+		    "Unexpected mallctl result");
 
 		nstime_update(&time);
 	} while (nstime_compare(&time, &deadline) <= 0 && npurge1 == npurge0);
 
-	assert_u64_gt(npurge1, npurge0, "Expected purging to occur");
+	if (config_stats)
+		assert_u64_gt(npurge1, npurge0, "Expected purging to occur");
 #undef NPS
 }
 TEST_END
@@ -281,7 +293,9 @@ TEST_BEGIN(test_decay_nonmonotonic)
 #define	NPS (SMOOTHSTEP_NSTEPS + 1)
 	int flags = (MALLOCX_ARENA(0) | MALLOCX_TCACHE_NONE);
 	void *ps[NPS];
-	uint64_t epoch, npurge0, npurge1;
+	uint64_t epoch;
+	uint64_t npurge0 = 0;
+	uint64_t npurge1 = 0;
 	size_t sz, large0;
 	unsigned i, nupdates0;
 
@@ -296,8 +310,8 @@ TEST_BEGIN(test_decay_nonmonotonic)
 	assert_d_eq(mallctl("epoch", NULL, NULL, &epoch, sizeof(uint64_t)), 0,
 	    "Unexpected mallctl failure");
 	sz = sizeof(uint64_t);
-	assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge0, &sz, NULL, 0), 0,
-	    "Unexpected mallctl failure");
+	assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge0, &sz, NULL, 0),
+	    config_stats ? 0 : ENOENT, "Unexpected mallctl result");
 
 	nupdates_mock = 0;
 	nstime_init(&time_mock, 0);
@@ -324,10 +338,11 @@ TEST_BEGIN(test_decay_nonmonotonic)
 	assert_d_eq(mallctl("epoch", NULL, NULL, &epoch, sizeof(uint64_t)), 0,
 	    "Unexpected mallctl failure");
 	sz = sizeof(uint64_t);
-	assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge1, &sz, NULL, 0), 0,
-	    "Unexpected mallctl failure");
+	assert_d_eq(mallctl("stats.arenas.0.npurge", &npurge1, &sz, NULL, 0),
+	    config_stats ? 0 : ENOENT, "Unexpected mallctl result");
 
-	assert_u64_gt(npurge1, npurge0, "Expected purging to occur");
+	if (config_stats)
+		assert_u64_gt(npurge1, npurge0, "Expected purging to occur");
 
 	nstime_update = nstime_update_orig;
 #undef NPS
