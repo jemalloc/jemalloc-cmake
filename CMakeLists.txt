@@ -178,7 +178,7 @@ endif()
 set(JEMALLOC_PREFIX je_)
 
 if(with-jemalloc-prefix)
-  set(JEMALLOC_PREFIX ${with_jemalloc_prefix})
+  set(JEMALLOC_PREFIX ${with-jemalloc-prefix})
 endif()
 
 # Uppercase copy of the JEMALLOC_PREFIX
