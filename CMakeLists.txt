@@ -171,15 +171,19 @@ set (JEMALLOC_OVERRIDE_VALLOC 0)
 if(with-mangling)
 # We are expecting entries separated by a comma
 # with individual entries split by a ':' as in n:m
-# Convert that into a CMake list of ':' separated pairs
+# Convert that into a CMake list of ';' separated pairs
   string(REPLACE "," ";" MANGLING_MAP  ${with-mangling})
 endif()
 
+# Substitute @je_@ in jemalloc_protos.h.in, primarily to make generation of
+# jemalloc_protos_jet.h easy.
 set(JEMALLOC_PREFIX je_)
 
 if(with-jemalloc-prefix)
   set(JEMALLOC_PREFIX ${with-jemalloc-prefix})
 endif()
+
+set(je_ ${JEMALLOC_PREFIX})
 
 # Uppercase copy of the JEMALLOC_PREFIX
 # Need  quotes so the preprocessor concats two strings
@@ -213,10 +217,6 @@ if(with-install-suffix)
     set(INSTALL_SUFFIX ${with-install-suffix})
     set(install_suffix ${with-install-suffix})
 endif()
-
-# Substitute @je_@ in jemalloc_protos.h.in, primarily to make generation of
-# jemalloc_protos_jet.h easy.
-set(je_ je_)
 
 # Do not silence irrelevant compiler warnings
 set(JEMALLOC_CC_SILENCE 1)
@@ -397,15 +397,15 @@ foreach(public_in jemalloc_macros.h jemalloc_defs.h jemalloc_protos.h jemalloc_t
     "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${public_in}" True)
 endforeach(public_in)  
 
-set(JEMALLOC_RENAME "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_rename.h")
-GenerateJemallocRename("${PUBLIC_SYM_FILE}" ${JEMALLOC_RENAME})
+set(JEMALLOC_RENAME_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_rename.h")
+GenerateJemallocRename("${PUBLIC_SYM_FILE}" ${JEMALLOC_RENAME_HDR})
 
-set(JEMALLOC_MANGLE "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle.h")
-GenerateJemallocMangle("${PUBLIC_SYM_FILE}" ${JEMALLOC_PREFIX} ${JEMALLOC_MANGLE})
+set(JEMALLOC_MANGLE_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle.h")
+GenerateJemallocMangle("${PUBLIC_SYM_FILE}" ${JEMALLOC_PREFIX} ${JEMALLOC_MANGLE_HDR})
 
 # Needed for tests
-set(JEMALLOC_MANGLE_JET "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle_jet.h")
-GenerateJemallocMangle("${PUBLIC_SYM_FILE}" ${JEMALLOC_PREFIX_JET} ${JEMALLOC_MANGLE_JET})
+set(JEMALLOC_MANGLE_JET_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_mangle_jet.h")
+GenerateJemallocMangle("${PUBLIC_SYM_FILE}" ${JEMALLOC_PREFIX_JET} ${JEMALLOC_MANGLE_JET_HDR})
 
 # Generate main public header
 set(JEMALLOC_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc${install_suffix}.h")
@@ -467,7 +467,7 @@ ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos.h.in
     "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos_jet.h" True)
 
 # revert
-set(je__ je_)
+set(je__ ${JEMALLOC_PREFIX})
 
 # May want to replace  /d2Zi+ to /Zo
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
@@ -540,6 +540,14 @@ set_target_properties(${LIBJEMALLOCLIB}
            ${LIBJEMALLOCLIB}
 )
 
+# if(with-jemalloc-prefix)
+ # set_target_properties(${LIBJEMALLOCLIB}
+          # PROPERTIES
+          # COMPILE_DEFINITIONS 
+          # JEMALLOC_MANGLE
+ # )
+# endif()
+
 ##################################################################
 ## Building tests
 
@@ -549,8 +557,18 @@ add_library(${C_JETLIB} ${C_SRCS})
 set_target_properties(${C_JETLIB}
            PROPERTIES
            COMPILE_DEFINITIONS 
-           JEMALLOC_JET
+           "JEMALLOC_JET"
 )
+
+# Set JEMALLOC_MANGLE for both libraries in case custom prefix is in effect
+if(with-jemalloc-prefix)
+ set_target_properties(${LIBJEMALLOCLIB} ${C_JETLIB}
+          PROPERTIES
+          COMPILE_DEFINITIONS 
+          JEMALLOC_MANGLE
+ )
+endif()
+
 
 # Form here onward
 include_directories(${PROJECT_SOURCE_DIR}/test/include)
@@ -675,7 +693,7 @@ foreach(sourcefile ${TESTS_UNIT})
                COMPILE_DEFINITIONS 
                JEMALLOC_UNIT_TEST
     )
-    target_link_libraries(${exename} ${C_TESTLIB_UNIT} ${C_JETLIB} ${LIBJEMALLOCLIB})
+    target_link_libraries(${exename} ${C_TESTLIB_UNIT} ${C_JETLIB} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
 endforeach(sourcefile ${TESTS_UNIT})
 
 
