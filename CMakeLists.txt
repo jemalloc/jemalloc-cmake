@@ -175,19 +175,21 @@ if(with-mangling)
   string(REPLACE "," ";" MANGLING_MAP  ${with-mangling})
 endif()
 
-# Substitute @je_@ in jemalloc_protos.h.in, primarily to make generation of
-# jemalloc_protos_jet.h easy.
+# Set the default API prefix for public
 set(JEMALLOC_PREFIX je_)
+# Protos are always je_ but are renamed by #defines according to prefix
+set(je_ "je_")
 
 if(with-jemalloc-prefix)
   set(JEMALLOC_PREFIX ${with-jemalloc-prefix})
 endif()
 
-set(je_ ${JEMALLOC_PREFIX})
 
 # Uppercase copy of the JEMALLOC_PREFIX
 # Need  quotes so the preprocessor concats two strings
-string(TOUPPER \"${JEMALLOC_PREFIX}\" JEMALLOC_CPREFIX)
+if(JEMALLOC_PREFIX)
+	string(TOUPPER \"${JEMALLOC_PREFIX}\" JEMALLOC_CPREFIX)
+endif()
 
 # Disable exporting jemalloc public APIs
 # We need to define the var to whitespace string
@@ -459,7 +461,7 @@ set(SIZE_CLASSES_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size
 SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"
  "${SIZE_CLASSES_HDR}")
 
- # To generate protos_jet
+# To generate protos_jet
 set(je_ jet_)
 
 # replace prefix only
@@ -467,7 +469,7 @@ ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos.h.in
     "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos_jet.h" True)
 
 # revert
-set(je__ ${JEMALLOC_PREFIX})
+set(je_ je_)
 
 # May want to replace  /d2Zi+ to /Zo
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
@@ -540,13 +542,14 @@ set_target_properties(${LIBJEMALLOCLIB}
            ${LIBJEMALLOCLIB}
 )
 
-# if(with-jemalloc-prefix)
- # set_target_properties(${LIBJEMALLOCLIB}
-          # PROPERTIES
-          # COMPILE_DEFINITIONS 
-          # JEMALLOC_MANGLE
- # )
-# endif()
+if(with-jemalloc-prefix)
+ set_target_properties(${LIBJEMALLOCLIB}
+          PROPERTIES
+          COMPILE_DEFINITIONS 
+          JEMALLOC_MANGLE
+ )
+endif()
+
 
 ##################################################################
 ## Building tests
@@ -554,21 +557,41 @@ set_target_properties(${LIBJEMALLOCLIB}
 # Rebuild for JET
 set(C_JETLIB jemalloc_jet${install_suffix})
 add_library(${C_JETLIB} ${C_SRCS})
+
+set(C_JETLIB_DEFS JEMALLOC_JET)
+if(with-jemalloc-prefix)
+   set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_MANGLE")
+endif()
+
 set_target_properties(${C_JETLIB}
            PROPERTIES
            COMPILE_DEFINITIONS 
-           "JEMALLOC_JET"
+           "${C_JETLIB_DEFS}"
 )
 
-# Set JEMALLOC_MANGLE for both libraries in case custom prefix is in effect
+set(C_UTIL_INTEGRATION_SRCS
+    src/nstime.c
+    src/util.c
+)
+
+# Util integration
+# We need this library consisting from a single file
+# compiled with jet_ prefix for a benchmark because
+# when linking the whole JET library we get duplicate symbols
+# this is the it is done in the original makefile
+set(C_UTIL_INTEGRATION jemalloc_util_int_test${install_suffix})
+add_library(${C_UTIL_INTEGRATION} ${C_UTIL_INTEGRATION_SRCS})
+
+set(C_UTIL_INTEGRATION_DEFS JEMALLOC_JET)
 if(with-jemalloc-prefix)
- set_target_properties(${LIBJEMALLOCLIB} ${C_JETLIB}
-          PROPERTIES
-          COMPILE_DEFINITIONS 
-          JEMALLOC_MANGLE
- )
+   set(C_UTIL_INTEGRATION_DEFS  "${C_UTIL_INTEGRATION_DEFS};JEMALLOC_MANGLE")
 endif()
 
+set_target_properties(${C_UTIL_INTEGRATION}
+           PROPERTIES
+           COMPILE_DEFINITIONS 
+           "${C_UTIL_INTEGRATION_DEFS}"
+)
 
 # Form here onward
 include_directories(${PROJECT_SOURCE_DIR}/test/include)
@@ -592,12 +615,18 @@ set(C_TESTLIB_SRCS
 # Unit tests test library
 set(C_TESTLIB_UNIT jemalloc_unit_test${install_suffix})
 add_library(${C_TESTLIB_UNIT} ${C_TESTLIB_SRCS})
+
+set(C_TESTLIB_UNIT_DEFS JEMALLOC_UNIT_TEST)
+# if(with-jemalloc-prefix)
+   # set(C_TESTLIB_UNIT_DEFS  "${C_TESTLIB_UNIT_DEFS};JEMALLOC_MANGLE")
+# endif()
+
 set_target_properties(${C_TESTLIB_UNIT}
            PROPERTIES
            COMPILE_OPTIONS 
            ${COMMON_TESTLIB_CCFLAGS} 
            COMPILE_DEFINITIONS
-           JEMALLOC_UNIT_TEST
+           "${C_TESTLIB_UNIT_DEFS}"
 )
 
 # Integration test library
@@ -620,24 +649,6 @@ set_target_properties(${C_TESTLIB_STRESS}
            ${COMMON_TESTLIB_CCFLAGS}
            COMPILE_DEFINITIONS
            "JEMALLOC_STRESS_TEST;JEMALLOC_STRESS_TESTLIB"
-)
-
-set(C_UTIL_INTEGRATION_SRCS
-    src/nstime.c
-    src/util.c
-)
-
-# Util integration
-# We need this library consisting from a single file
-# compiled with jet_ prefix for a benchmark because
-# when linking the whole JET library we get duplicate symbols
-# this is the it is done in the original makefile
-set(C_UTIL_INTEGRATION jemalloc_util_int_test${install_suffix})
-add_library(${C_UTIL_INTEGRATION} ${C_UTIL_INTEGRATION_SRCS})
-set_target_properties(${C_UTIL_INTEGRATION}
-           PROPERTIES
-           COMPILE_DEFINITIONS 
-           JEMALLOC_JET
 )
 
 set(TESTS_UNIT
@@ -726,22 +737,24 @@ foreach(sourcefile ${TESTS_INTEGRATION})
     target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
 endforeach(sourcefile ${TESTS_UNIT})
 
-# set(TESTS_STRESS
-    # test/stress/microbench.c
-# )
+set(TESTS_STRESS
+    test/stress/microbench.c
+)
 
-# # Build Stress tests
-# foreach(sourcefile ${TESTS_STRESS})
-    # string(REPLACE ".c" "" exename ${sourcefile})
-    # string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
-    # set(exename "${exename}${install_suffix}")
-    # add_executable(${exename} ${sourcefile})
-    # set_target_properties(${exename}
-               # PROPERTIES
-               # COMPILE_DEFINITIONS 
-               # JEMALLOC_STRESS_TEST
-    # )
-    # target_link_libraries(${exename} ${C_TESTLIB_STRESS} ${LIBJEMALLOCLIB} ${C_UTIL_INTEGRATION})
-# endforeach(sourcefile ${TESTS_UNIT})
+# Build Stress tests
+foreach(sourcefile ${TESTS_STRESS})
+    string(REPLACE ".c" "" exename ${sourcefile})
+    string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
+    set(exename "${exename}${install_suffix}")
+    add_executable(${exename} ${sourcefile})
+    set_target_properties(${exename}
+               PROPERTIES
+               COMPILE_DEFINITIONS 
+               JEMALLOC_STRESS_TEST
+			   LINK_FLAGS
+			   /FORCE:MULTIPLE  # Symbol clush between C_JETLIB and LIBJEMALLOCLIB
+    )
+    target_link_libraries(${exename} ${C_TESTLIB_STRESS} ${C_JETLIB} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
+endforeach(sourcefile ${TESTS_UNIT})
 
 
