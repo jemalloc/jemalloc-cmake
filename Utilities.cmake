@@ -488,7 +488,6 @@ message(STATUS "Creating public header ${output_file}")
 
 # File Header
 file(WRITE "${output_file}.header"
-  "#pragma once\n\n"
   "#ifndef JEMALLOC_H_\n"
   "#define	JEMALLOC_H_\n"
   "#ifdef __cplusplus\n"
