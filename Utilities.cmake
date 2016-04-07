@@ -644,8 +644,8 @@ endfunction(ConfigureFile)
 function (GetAndParseVersion)
 
 if (GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-    execute_process(COMMAND $ENV{COMSPEC} /C 
-      ${GIT_EXECUTABLE} -C ${CMAKE_CURRENT_SOURCE_DIR} describe --long --abbrev=40 HEAD OUTPUT_VARIABLE jemalloc_version)
+    execute_process(COMMAND ${GIT_EXECUTABLE}
+	-C "${CMAKE_CURRENT_SOURCE_DIR}" describe --long --abbrev=40 HEAD OUTPUT_VARIABLE jemalloc_version)
     
     # Figure out version components    
     string (REPLACE "\n" "" jemalloc_version  ${jemalloc_version})
