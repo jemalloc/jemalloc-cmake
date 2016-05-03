@@ -379,6 +379,14 @@ message(STATUS "Finished configuring class sizes\n")
 endfunction (SizeClasses)
 
 #############################################
+# Read one file and append it to another
+function (AppendFileContents input output)
+file(READ ${input} buffer)
+file(APPEND ${output} "${buffer}")
+endfunction (AppendFileContents)
+
+
+#############################################
 # Generate public symbols list
 function (GeneratePublicSymbolsList public_sym_list mangling_map symbol_prefix output_file)
 
@@ -486,8 +494,10 @@ file(REMOVE ${output_file})
 
 message(STATUS "Creating public header ${output_file}")
 
+file(TO_NATIVE_PATH "${output_file}" ntv_output_file)
+
 # File Header
-file(WRITE "${output_file}.header"
+file(WRITE "${ntv_output_file}"
   "#ifndef JEMALLOC_H_\n"
   "#define	JEMALLOC_H_\n"
   "#ifdef __cplusplus\n"
@@ -495,47 +505,19 @@ file(WRITE "${output_file}.header"
   "#endif\n\n"
 )
 
+foreach(pub_hdr ${header_list} )
+  set(HDR_PATH "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${pub_hdr}")
+  file(TO_NATIVE_PATH "${HDR_PATH}" ntv_pub_hdr)
+  AppendFileContents(${ntv_pub_hdr} ${ntv_output_file})
+endforeach(pub_hdr)
+
 # Footer
-file(WRITE "${output_file}.footer"
+file(APPEND "${ntv_output_file}"
   "#ifdef __cplusplus\n"
   "}\n"
   "#endif\n"
   "#endif /* JEMALLOC_H_ */\n"
 )
-
-# We need to utlize copy command here because of the unexpected FILE function
-# behavior as follows
-# - file(STRINGS) unexpectedly reads two lines when a preprocessor continuations
-# is encoutered. In the process \ is replaced to a ; and we get a CMake list of
-# two lines, instead of one. When such a line written back we get single line with
-# ; in the middle
-# - file(READ) which is expected to handle files as binaries removes trailing ; and
-# ruins function prototypes.
-
-# Create a Windows path for copy command
-file(TO_NATIVE_PATH "${output_file}" ntv_output_file)
-file(TO_NATIVE_PATH "${output_file}.header" ntv_header)
-file(TO_NATIVE_PATH "${output_file}.footer" ntv_footer)
-
-list(APPEND ntv_path_list ${ntv_header})
-
-foreach(pub_hdr ${header_list} )
-  set(HDR_PATH "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/${pub_hdr}")
-  file(TO_NATIVE_PATH "${HDR_PATH}" ntv_pub_hdr)
-  list(APPEND ntv_path_list +${ntv_pub_hdr})
-endforeach(pub_hdr)
-
-list(APPEND ntv_path_list +${ntv_footer})
-
-execute_process(COMMAND $ENV{COMSPEC} /C copy ${ntv_path_list} ${ntv_output_file}
- RESULT_VARIABLE error_level
- ERROR_VARIABLE error_output)
-
-if(NOT ${error_level} EQUAL 0)
-  message(FATAL_ERROR "Public header concatenation completed with ${error_level} : ${error_output}")
-endif()
-
-file(REMOVE "${output_file}.header" "${output_file}.footer")
 
 endfunction(CreateJemallocHeader)
 
@@ -609,7 +591,7 @@ file(TO_NATIVE_PATH "${file_path}" ntv_file_path)
 
 # This converts #undefs into #cmakedefines so configure_file can handle it
 set(PS_CMD
-"Get-Content ${ntv_file_path} |
+"Get-Content \"${ntv_file_path}\" |
 ForEach { 
 if($_ -match '^#undef[ \t]*[^ \t]*')
   { $_ -replace '^#undef[ \t]*([^ \t]*)','#cmakedefine $1 @$1@' } else {$_}}"
@@ -644,8 +626,8 @@ endfunction(ConfigureFile)
 function (GetAndParseVersion)
 
 if (GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-    execute_process(COMMAND $ENV{COMSPEC} /C 
-      ${GIT_EXECUTABLE} -C ${CMAKE_CURRENT_SOURCE_DIR} describe --long --abbrev=40 HEAD OUTPUT_VARIABLE jemalloc_version)
+    execute_process(COMMAND ${GIT_EXECUTABLE}
+	-C "${CMAKE_CURRENT_SOURCE_DIR}" describe --long --abbrev=40 HEAD OUTPUT_VARIABLE jemalloc_version)
     
     # Figure out version components    
     string (REPLACE "\n" "" jemalloc_version  ${jemalloc_version})
