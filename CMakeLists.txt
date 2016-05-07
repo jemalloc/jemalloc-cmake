@@ -656,6 +656,7 @@ set(TESTS_UNIT
     test/unit/bitmap.c
     test/unit/ckh.c
     test/unit/decay.c
+    test/unit/fork.c
     test/unit/hash.c
     test/unit/junk.c
     test/unit/junk_alloc.c
