@@ -1,5 +1,9 @@
 #include "test/jemalloc_test.h"
 
+#ifdef JEMALLOC_FILL
+const char *malloc_conf = "junk:false";
+#endif
+
 static unsigned
 get_nsizes_impl(const char *cmd)
 {
@@ -69,35 +73,41 @@ TEST_END
 
 TEST_BEGIN(test_oom)
 {
-	size_t hugemax, size, alignment;
-
-	hugemax = get_huge_size(get_nhuge()-1);
+	size_t hugemax;
+	bool oom;
+	void *ptrs[3];
+	unsigned i;
 
 	/*
-	 * It should be impossible to allocate two objects that each consume
-	 * more than half the virtual address space.
+	 * It should be impossible to allocate three objects that each consume
+	 * nearly half the virtual address space.
 	 */
-	{
-		void *p;
-
-		p = mallocx(hugemax, 0);
-		if (p != NULL) {
-			assert_ptr_null(mallocx(hugemax, 0),
-			    "Expected OOM for mallocx(size=%#zx, 0)", hugemax);
-			dallocx(p, 0);
-		}
+	hugemax = get_huge_size(get_nhuge()-1);
+	oom = false;
+	for (i = 0; i < sizeof(ptrs) / sizeof(void *); i++) {
+		ptrs[i] = mallocx(hugemax, 0);
+		if (ptrs[i] == NULL)
+			oom = true;
+	}
+	assert_true(oom,
+	    "Expected OOM during series of calls to mallocx(size=%zu, 0)",
+	    hugemax);
+	for (i = 0; i < sizeof(ptrs) / sizeof(void *); i++) {
+		if (ptrs[i] != NULL)
+			dallocx(ptrs[i], 0);
 	}
 
 #if LG_SIZEOF_PTR == 3
-	size      = ZU(0x8000000000000000);
-	alignment = ZU(0x8000000000000000);
+	assert_ptr_null(mallocx(0x8000000000000000ULL,
+	    MALLOCX_ALIGN(0x8000000000000000ULL)),
+	    "Expected OOM for mallocx()");
+	assert_ptr_null(mallocx(0x8000000000000000ULL,
+	    MALLOCX_ALIGN(0x80000000)),
+	    "Expected OOM for mallocx()");
 #else
-	size      = ZU(0x80000000);
-	alignment = ZU(0x80000000);
+	assert_ptr_null(mallocx(0x80000000UL, MALLOCX_ALIGN(0x80000000UL)),
+	    "Expected OOM for mallocx()");
 #endif
-	assert_ptr_null(mallocx(size, MALLOCX_ALIGN(alignment)),
-	    "Expected OOM for mallocx(size=%#zx, MALLOCX_ALIGN(%#zx)", size,
-	    alignment);
 }
 TEST_END
 

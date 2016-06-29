@@ -540,8 +540,8 @@ for (i = 0; i < nbins; i++) {
     are smaller than four times the page size, large size classes are smaller
     than the chunk size (see the <link
     linkend="opt.lg_chunk"><mallctl>opt.lg_chunk</mallctl></link> option), and
-    huge size classes extend from the chunk size up to one size class less than
-    the full address space size.</para>
+    huge size classes extend from the chunk size up to the largest size class
+    that does not exceed <constant>PTRDIFF_MAX</constant>.</para>
 
     <para>Allocations are packed tightly together, which can be an issue for
     multi-threaded applications.  If you need to assure that allocations do not
@@ -659,7 +659,7 @@ for (i = 0; i < nbins; i++) {
           <entry>[1280 KiB, 1536 KiB, 1792 KiB]</entry>
         </row>
         <row>
-          <entry morerows="6">Huge</entry>
+          <entry morerows="8">Huge</entry>
           <entry>256 KiB</entry>
           <entry>[2 MiB]</entry>
         </row>
@@ -686,6 +686,14 @@ for (i = 0; i < nbins; i++) {
         <row>
           <entry>...</entry>
           <entry>...</entry>
+        </row>
+        <row>
+          <entry>512 PiB</entry>
+          <entry>[2560 PiB, 3 EiB, 3584 PiB, 4 EiB]</entry>
+        </row>
+        <row>
+          <entry>1 EiB</entry>
+          <entry>[5 EiB, 6 EiB, 7 EiB]</entry>
         </row>
       </tbody>
       </tgroup>
@@ -1016,7 +1024,7 @@ for (i = 0; i < nbins; i++) {
         allocate memory during application initialization and then deadlock
         internally when jemalloc in turn calls
         <function>atexit<parameter/></function>, so this option is not
-        univerally usable (though the application can register its own
+        universally usable (though the application can register its own
         <function>atexit<parameter/></function> function with equivalent
         functionality).  Therefore, this option should only be used with care;
         it is primarily intended as a performance tuning aid during application
@@ -1320,7 +1328,7 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         option.  Note that <function>atexit<parameter/></function> may allocate
         memory during application initialization and then deadlock internally
         when jemalloc in turn calls <function>atexit<parameter/></function>, so
-        this option is not univerally usable (though the application can
+        this option is not universally usable (though the application can
         register its own <function>atexit<parameter/></function> function with
         equivalent functionality).  This option is disabled by
         default.</para></listitem>
@@ -1548,6 +1556,23 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         time; see <link
         linkend="opt.decay_time"><mallctl>opt.decay_time</mallctl></link> for
         details.</para></listitem>
+      </varlistentry>
+
+      <varlistentry id="arena.i.reset">
+        <term>
+          <mallctl>arena.&lt;i&gt;.reset</mallctl>
+          (<type>void</type>)
+          <literal>--</literal>
+        </term>
+        <listitem><para>Discard all of the arena's extant allocations.  This
+        interface can only be used with arenas created via <link
+        linkend="arenas.extend"><mallctl>arenas.extend</mallctl></link>.  None
+        of the arena's discarded/cached allocations may accessed afterward.  As
+        part of this requirement, all thread caches which were used to
+        allocate/deallocate in conjunction with the arena must be flushed
+        beforehand.  This interface cannot be used if running inside Valgrind,
+        nor if the <link linkend="opt.quarantine">quarantine</link> size is
+        non-zero.</para></listitem>
       </varlistentry>
 
       <varlistentry id="arena.i.dss">
@@ -2062,7 +2087,7 @@ typedef struct {
           [<option>--enable-prof</option>]
         </term>
         <listitem><para>Average number of bytes allocated between
-        inverval-based profile dumps.  See the
+        interval-based profile dumps.  See the
         <link
         linkend="opt.lg_prof_interval"><mallctl>opt.lg_prof_interval</mallctl></link>
         option for additional information.</para></listitem>
@@ -2161,6 +2186,25 @@ typedef struct {
         linkend="stats.resident"><mallctl>stats.resident</mallctl></link>.</para></listitem>
       </varlistentry>
 
+      <varlistentry id="stats.retained">
+        <term>
+          <mallctl>stats.retained</mallctl>
+          (<type>size_t</type>)
+          <literal>r-</literal>
+          [<option>--enable-stats</option>]
+        </term>
+        <listitem><para>Total number of bytes in virtual memory mappings that
+        were retained rather than being returned to the operating system via
+        e.g. <citerefentry><refentrytitle>munmap</refentrytitle>
+        <manvolnum>2</manvolnum></citerefentry>.  Retained virtual memory is
+        typically untouched, decommitted, or purged, so it has no strongly
+        associated physical memory (see <link
+        linkend="arena.i.chunk_hooks">chunk hooks</link> for details).  Retained
+        memory is excluded from mapped memory statistics, e.g. <link
+        linkend="stats.mapped"><mallctl>stats.mapped</mallctl></link>.
+        </para></listitem>
+      </varlistentry>
+
       <varlistentry id="stats.arenas.i.dss">
         <term>
           <mallctl>stats.arenas.&lt;i&gt;.dss</mallctl>
@@ -2239,6 +2283,18 @@ typedef struct {
           [<option>--enable-stats</option>]
         </term>
         <listitem><para>Number of mapped bytes.</para></listitem>
+      </varlistentry>
+
+      <varlistentry id="stats.arenas.i.retained">
+        <term>
+          <mallctl>stats.arenas.&lt;i&gt;.retained</mallctl>
+          (<type>size_t</type>)
+          <literal>r-</literal>
+          [<option>--enable-stats</option>]
+        </term>
+        <listitem><para>Number of retained bytes.  See <link
+        linkend="stats.retained"><mallctl>stats.retained</mallctl></link> for
+        details.</para></listitem>
       </varlistentry>
 
       <varlistentry id="stats.arenas.i.metadata.mapped">

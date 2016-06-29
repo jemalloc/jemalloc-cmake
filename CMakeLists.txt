@@ -446,16 +446,19 @@ PrivateUnnamespace("${PRIVATE_SYM_FILE}" "${PRIVATE_UNNAMESPACE_FILE}")
 ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/jemalloc_internal.h" False)
 
+    
 foreach(internal_in jemalloc_internal_defs.h)
   ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/${internal_in}.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/${internal_in}" True)
 endforeach(internal_in)  
 
 # Test related headers
-foreach(test_in jemalloc_test_defs.h jemalloc_test.h)
-  ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/${test_in}.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/${test_in}" True)
-endforeach(test_in)  
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h.in"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test_defs.h" True)
+
+ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h.in"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test/include/test/jemalloc_test.h" False)
+
 
 set(SIZE_CLASSES_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/internal/size_classes.h")
 SizeClasses("${LG_QUANTA}" ${LG_TINY_MIN} "${LG_PAGE_SIZES}" "${LG_SIZE_CLASS_GROUP}"
@@ -527,6 +530,7 @@ set(C_SRCS
   src/util.c
   # src/valgrind.c # Valgrind integration only
   # src/zone.c # Darwin only file
+  src/witness.c
 )
 
 # The original library, delivery product
@@ -652,10 +656,13 @@ set_target_properties(${C_TESTLIB_STRESS}
 )
 
 set(TESTS_UNIT
+    test/unit/a0.c
+    test/unit/arena_reset.c
     test/unit/atomic.c
     test/unit/bitmap.c
     test/unit/ckh.c
     test/unit/decay.c
+    test/unit/fork.c
     test/unit/hash.c
     test/unit/junk.c
     test/unit/junk_alloc.c
@@ -665,6 +672,7 @@ set(TESTS_UNIT
     test/unit/math.c
     test/unit/mq.c
     test/unit/mtx.c
+    test/unit/ph.c
     test/unit/prng.c
     test/unit/prof_accum.c
     test/unit/prof_active.c
@@ -686,6 +694,7 @@ set(TESTS_UNIT
     test/unit/nstime.c
     test/unit/tsd.c
     test/unit/util.c
+    test/unit/witness.c
     test/unit/zero.c
 )
 
