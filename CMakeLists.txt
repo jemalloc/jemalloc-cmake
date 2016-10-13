@@ -524,6 +524,7 @@ set(C_SRCS
   src/quarantine.c
   src/rtree.c
   src/stats.c
+  src/spin.c
   src/tcache.c
   src/ticker.c
   src/tsd.c
