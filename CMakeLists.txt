@@ -19,6 +19,13 @@
 # 4. And release mode (/m[:<N>] is also supported)
 #        msbuild jemalloc.sln /p:Configuration=Release
 #
+
+# Currently this file only enables building on Windows and not Cygwin or MSYS
+cmake_minimum_required (VERSION 3.4 FATAL_ERROR)
+
+# Set policy based on the CMake version
+cmake_policy(VERSION 3.4.3)
+
 # The following config switches that mimic the original autoconf behavior are supported
 # use -D to define
 # 
@@ -45,12 +52,6 @@
 #  with-lg_size-class-group=<Base 2 log of size classes per doubling> default 2
 #  NOT SUPPORTED enable-lazy-lock
 #  
-
-# Currently this file only enables building on Windows and not Cygwin or MSYS
-cmake_minimum_required (VERSION 3.4 FATAL_ERROR)
-
-# Set policy based on the CMake version
-cmake_policy(VERSION 3.4.3)
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
@@ -281,6 +282,8 @@ set(JEMALLOC_CACHE_OBLIVIOUS 1)
 if(disable-cache-oblivious)
   set(JEMALLOC_CACHE_OBLIVIOUS 0)
 endif()
+
+set(JEMALLOC_INTERNAL_UNREACHABLE abort)
 
 # ffsl and ffs are defined in msvc_compat/strings.h
 set(JEMALLOC_INTERNAL_FFSL ffsl)
@@ -529,10 +532,13 @@ set(C_SRCS
   src/ticker.c
   src/tsd.c
   src/util.c
-  # src/valgrind.c # Valgrind integration only
   # src/zone.c # Darwin only file
   src/witness.c
 )
+
+if(enable_valgrind)
+    list(APPEND C_SRCS src/valgrind.c)
+endif()
 
 # The original library, delivery product
 set(LIBJEMALLOCLIB jemalloc${install_suffix})
@@ -622,9 +628,6 @@ set(C_TESTLIB_UNIT jemalloc_unit_test${install_suffix})
 add_library(${C_TESTLIB_UNIT} ${C_TESTLIB_SRCS})
 
 set(C_TESTLIB_UNIT_DEFS JEMALLOC_UNIT_TEST)
-# if(with-jemalloc-prefix)
-   # set(C_TESTLIB_UNIT_DEFS  "${C_TESTLIB_UNIT_DEFS};JEMALLOC_MANGLE")
-# endif()
 
 set_target_properties(${C_TESTLIB_UNIT}
            PROPERTIES
@@ -761,8 +764,8 @@ foreach(sourcefile ${TESTS_STRESS})
                PROPERTIES
                COMPILE_DEFINITIONS 
                JEMALLOC_STRESS_TEST
-			   LINK_FLAGS
-			   /FORCE:MULTIPLE  # Symbol clush between C_JETLIB and LIBJEMALLOCLIB
+               LINK_FLAGS
+               /FORCE:MULTIPLE  # Symbol clush between C_JETLIB and LIBJEMALLOCLIB
     )
     target_link_libraries(${exename} ${C_TESTLIB_STRESS} ${C_JETLIB} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
 endforeach(sourcefile ${TESTS_UNIT})
