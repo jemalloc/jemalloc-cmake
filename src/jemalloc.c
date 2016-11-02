@@ -5,7 +5,11 @@
 /* Data. */
 
 /* Runtime configuration options. */
-const char	*je_malloc_conf JEMALLOC_ATTR(weak);
+const char	*je_malloc_conf
+#ifndef _WIN32
+    JEMALLOC_ATTR(weak)
+#endif
+    ;
 bool	opt_abort =
 #ifdef JEMALLOC_DEBUG
     true
@@ -85,14 +89,25 @@ enum {
 };
 static uint8_t	malloc_slow_flags;
 
-/* Last entry for overflow detection only.  */
 JEMALLOC_ALIGNED(CACHELINE)
-const size_t	index2size_tab[NSIZES+1] = {
-#define	SC(index, lg_grp, lg_delta, ndelta, bin, lg_delta_lookup) \
+const size_t	pind2sz_tab[NPSIZES] = {
+#define	PSZ_yes(lg_grp, ndelta, lg_delta)				\
+	(((ZU(1)<<lg_grp) + (ZU(ndelta)<<lg_delta))),
+#define	PSZ_no(lg_grp, ndelta, lg_delta)
+#define	SC(index, lg_grp, lg_delta, ndelta, psz, bin, lg_delta_lookup)	\
+	PSZ_##psz(lg_grp, ndelta, lg_delta)
+	SIZE_CLASSES
+#undef PSZ_yes
+#undef PSZ_no
+#undef SC
+};
+
+JEMALLOC_ALIGNED(CACHELINE)
+const size_t	index2size_tab[NSIZES] = {
+#define	SC(index, lg_grp, lg_delta, ndelta, psz, bin, lg_delta_lookup)	\
 	((ZU(1)<<lg_grp) + (ZU(ndelta)<<lg_delta)),
 	SIZE_CLASSES
 #undef SC
-	ZU(0)
 };
 
 JEMALLOC_ALIGNED(CACHELINE)
@@ -161,7 +176,7 @@ const uint8_t	size2index_tab[] = {
 #define	S2B_11(i)	S2B_10(i) S2B_10(i)
 #endif
 #define	S2B_no(i)
-#define	SC(index, lg_grp, lg_delta, ndelta, bin, lg_delta_lookup) \
+#define	SC(index, lg_grp, lg_delta, ndelta, psz, bin, lg_delta_lookup)	\
 	S2B_##lg_delta_lookup(index)
 	SIZE_CLASSES
 #undef S2B_3
@@ -462,15 +477,16 @@ arena_bind(tsd_t *tsd, unsigned ind, bool internal)
 {
 	arena_t *arena;
 
+	if (!tsd_nominal(tsd))
+		return;
+
 	arena = arena_get(tsd_tsdn(tsd), ind, false);
 	arena_nthreads_inc(arena, internal);
 
-	if (tsd_nominal(tsd)) {
-		if (internal)
-			tsd_iarena_set(tsd, arena);
-		else
-			tsd_arena_set(tsd, arena);
-	}
+	if (internal)
+		tsd_iarena_set(tsd, arena);
+	else
+		tsd_arena_set(tsd, arena);
 }
 
 void
@@ -796,6 +812,18 @@ malloc_ncpus(void)
 	SYSTEM_INFO si;
 	GetSystemInfo(&si);
 	result = si.dwNumberOfProcessors;
+#elif defined(JEMALLOC_GLIBC_MALLOC_HOOK)
+	/*
+	 * glibc's sysconf() uses isspace().  glibc allocates for the first time
+	 * *before* setting up the isspace tables.  Therefore we need a
+	 * different method to get the number of CPUs.
+	 */
+	{
+		cpu_set_t set;
+
+		pthread_getaffinity_np(pthread_self(), sizeof(set), &set);
+		result = CPU_COUNT(&set);
+	}
 #else
 	result = sysconf(_SC_NPROCESSORS_ONLN);
 #endif
@@ -1155,9 +1183,20 @@ malloc_conf_init(void)
 			if (config_fill) {
 				if (CONF_MATCH("junk")) {
 					if (CONF_MATCH_VALUE("true")) {
-						opt_junk = "true";
-						opt_junk_alloc = opt_junk_free =
-						    true;
+						if (config_valgrind &&
+						    unlikely(in_valgrind)) {
+							malloc_conf_error(
+							"Deallocation-time "
+							"junk filling cannot "
+							"be enabled while "
+							"running inside "
+							"Valgrind", k, klen, v,
+							vlen);
+						} else {
+							opt_junk = "true";
+							opt_junk_alloc = true;
+							opt_junk_free = true;
+						}
 					} else if (CONF_MATCH_VALUE("false")) {
 						opt_junk = "false";
 						opt_junk_alloc = opt_junk_free =
@@ -1167,9 +1206,20 @@ malloc_conf_init(void)
 						opt_junk_alloc = true;
 						opt_junk_free = false;
 					} else if (CONF_MATCH_VALUE("free")) {
-						opt_junk = "free";
-						opt_junk_alloc = false;
-						opt_junk_free = true;
+						if (config_valgrind &&
+						    unlikely(in_valgrind)) {
+							malloc_conf_error(
+							"Deallocation-time "
+							"junk filling cannot "
+							"be enabled while "
+							"running inside "
+							"Valgrind", k, klen, v,
+							vlen);
+						} else {
+							opt_junk = "free";
+							opt_junk_alloc = false;
+							opt_junk_free = true;
+						}
 					} else {
 						malloc_conf_error(
 						    "Invalid conf value", k,
@@ -1255,13 +1305,14 @@ malloc_init_hard_needed(void)
 	}
 #ifdef JEMALLOC_THREADED_INIT
 	if (malloc_initializer != NO_INITIALIZER && !IS_INITIALIZER) {
-     spin_t spinner;
+		spin_t spinner;
+
 		/* Busy-wait until the initializing thread completes. */
-     spin_init(&spinner);
+		spin_init(&spinner);
 		do {
-			malloc_mutex_unlock(NULL, &init_lock);
-      spin_adaptive(&spinner);
-			malloc_mutex_lock(NULL, &init_lock);
+			malloc_mutex_unlock(TSDN_NULL, &init_lock);
+			spin_adaptive(&spinner);
+			malloc_mutex_lock(TSDN_NULL, &init_lock);
 		} while (!malloc_initialized());
 		return (false);
 	}
@@ -1295,8 +1346,7 @@ malloc_init_hard_a0_locked()
 		return (true);
 	if (config_prof)
 		prof_boot1();
-	if (arena_boot())
-		return (true);
+	arena_boot();
 	if (config_tcache && tcache_boot(TSDN_NULL))
 		return (true);
 	if (malloc_mutex_init(&arenas_lock, "arenas", WITNESS_RANK_ARENAS))
@@ -2002,6 +2052,25 @@ JEMALLOC_EXPORT void *(*__realloc_hook)(void *ptr, size_t size) = je_realloc;
 JEMALLOC_EXPORT void *(*__memalign_hook)(size_t alignment, size_t size) =
     je_memalign;
 # endif
+
+/*
+ * To enable static linking with glibc, the libc specific malloc interface must
+ * be implemented also, so none of glibc's malloc.o functions are added to the
+ * link.
+ */
+#define	ALIAS(je_fn)	__attribute__((alias (#je_fn), used))
+/* To force macro expansion of je_ prefix before stringification. */
+#define	PREALIAS(je_fn)  ALIAS(je_fn)
+void	*__libc_malloc(size_t size) PREALIAS(je_malloc);
+void	__libc_free(void* ptr) PREALIAS(je_free);
+void	*__libc_realloc(void* ptr, size_t size) PREALIAS(je_realloc);
+void	*__libc_calloc(size_t n, size_t size) PREALIAS(je_calloc);
+void	*__libc_memalign(size_t align, size_t s) PREALIAS(je_memalign);
+void	*__libc_valloc(size_t size) PREALIAS(je_valloc);
+int	__posix_memalign(void** r, size_t a, size_t s)
+    PREALIAS(je_posix_memalign);
+#undef PREALIAS
+#undef ALIAS
 #endif
 
 /*

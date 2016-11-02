@@ -118,6 +118,7 @@ dnl If CFLAGS isn't defined, set CFLAGS to something reasonable.  Otherwise,
 dnl just prevent autoconf from molesting CFLAGS.
 CFLAGS=$CFLAGS
 AC_PROG_CC
+
 if test "x$GCC" != "xyes" ; then
   AC_CACHE_CHECK([whether compiler is MSVC],
                  [je_cv_msvc],
@@ -129,6 +130,42 @@ if test "x$GCC" != "xyes" ; then
 ])],
                                [je_cv_msvc=yes],
                                [je_cv_msvc=no])])
+fi
+
+dnl check if a cray prgenv wrapper compiler is being used
+je_cv_cray_prgenv_wrapper=""
+if test "x${PE_ENV}" != "x" ; then
+  case "${CC}" in
+    CC|cc)
+	je_cv_cray_prgenv_wrapper="yes"
+	;;
+    *)
+       ;;
+  esac
+fi
+
+AC_CACHE_CHECK([whether compiler is cray],
+              [je_cv_cray],
+              [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+                                                  [
+#ifndef _CRAYC
+  int fail[-1];
+#endif
+])],
+                            [je_cv_cray=yes],
+                            [je_cv_cray=no])])
+
+if test "x${je_cv_cray}" = "xyes" ; then
+  AC_CACHE_CHECK([whether cray compiler version is 8.4],
+                [je_cv_cray_84],
+                [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+                                                      [
+#if !(_RELEASE_MAJOR == 8 && _RELEASE_MINOR == 4)
+  int fail[-1];
+#endif
+])],
+                              [je_cv_cray_84=yes],
+                              [je_cv_cray_84=no])])
 fi
 
 if test "x$CFLAGS" = "x" ; then
@@ -152,11 +189,21 @@ if test "x$CFLAGS" = "x" ; then
     JE_CFLAGS_APPEND([-FS])
     CPPFLAGS="$CPPFLAGS -I${srcdir}/include/msvc_compat"
   fi
+  if test "x$je_cv_cray" = "xyes" ; then
+    dnl cray compiler 8.4 has an inlining bug
+    if test "x$je_cv_cray_84" = "xyes" ; then
+      JE_CFLAGS_APPEND([-hipa2])
+      JE_CFLAGS_APPEND([-hnognu])
+    fi
+    if test "x$enable_cc_silence" != "xno" ; then
+      dnl ignore unreachable code warning
+      JE_CFLAGS_APPEND([-hnomessage=128])
+      dnl ignore redefinition of "malloc", "free", etc warning
+      JE_CFLAGS_APPEND([-hnomessage=1357])
+    fi
+  fi
 fi
-dnl Append EXTRA_CFLAGS to CFLAGS, if defined.
-if test "x$EXTRA_CFLAGS" != "x" ; then
-  JE_CFLAGS_APPEND([$EXTRA_CFLAGS])
-fi
+AC_SUBST([EXTRA_CFLAGS])
 AC_PROG_CPP
 
 AC_C_BIGENDIAN([ac_cv_big_endian=1], [ac_cv_big_endian=0])
@@ -263,16 +310,26 @@ o="$ac_objext"
 a="a"
 exe="$ac_exeext"
 libprefix="lib"
+link_whole_archive="0"
 DSO_LDFLAGS='-shared -Wl,-soname,$(@F)'
 RPATH='-Wl,-rpath,$(1)'
 SOREV="${so}.${rev}"
 PIC_CFLAGS='-fPIC -DPIC'
 CTARGET='-o $@'
 LDTARGET='-o $@'
+TEST_LD_MODE=
 EXTRA_LDFLAGS=
 ARFLAGS='crus'
 AROUT=' $@'
 CC_MM=1
+
+if test "x$je_cv_cray_prgenv_wrapper" = "xyes" ; then
+  TEST_LD_MODE='-dynamic'
+fi
+
+if test "x${je_cv_cray}" = "xyes" ; then
+  CC_MM=
+fi
 
 AN_MAKEVAR([AR], [AC_PROG_AR])
 AN_PROGRAM([ar], [AC_PROG_AR])
@@ -286,11 +343,11 @@ dnl
 dnl Define cpp macros in CPPFLAGS, rather than doing AC_DEFINE(macro), since the
 dnl definitions need to be seen before any headers are included, which is a pain
 dnl to make happen otherwise.
+CFLAGS="$CFLAGS"
 default_munmap="1"
 maps_coalesce="1"
 case "${host}" in
   *-*-darwin* | *-*-ios*)
-	CFLAGS="$CFLAGS"
 	abi="macho"
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	RPATH=""
@@ -303,30 +360,26 @@ case "${host}" in
 	sbrk_deprecated="1"
 	;;
   *-*-freebsd*)
-	CFLAGS="$CFLAGS"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_SYSCTL_VM_OVERCOMMIT], [ ])
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	force_lazy_lock="1"
 	;;
   *-*-dragonfly*)
-	CFLAGS="$CFLAGS"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	;;
   *-*-openbsd*)
-	CFLAGS="$CFLAGS"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	force_tls="0"
 	;;
   *-*-bitrig*)
-	CFLAGS="$CFLAGS"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	;;
   *-*-linux*)
-	CFLAGS="$CFLAGS"
+	dnl secure_getenv() is exposed by _GNU_SOURCE.
 	CPPFLAGS="$CPPFLAGS -D_GNU_SOURCE"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_HAS_ALLOCA_H])
@@ -345,13 +398,12 @@ case "${host}" in
 #error aout
 #endif
 ]])],
-                          [CFLAGS="$CFLAGS"; abi="elf"],
+                          [abi="elf"],
                           [abi="aout"])
 	AC_MSG_RESULT([$abi])
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	;;
   *-*-solaris2*)
-	CFLAGS="$CFLAGS"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	RPATH='-Wl,-R,$(1)'
@@ -372,7 +424,6 @@ case "${host}" in
   *-*-mingw* | *-*-cygwin*)
 	abi="pecoff"
 	force_tls="0"
-	force_lazy_lock="1"
 	maps_coalesce="0"
 	RPATH=""
 	so="dll"
@@ -389,6 +440,7 @@ case "${host}" in
         else
 	  importlib="${so}"
 	  DSO_LDFLAGS="-shared"
+	  link_whole_archive="1"
 	fi
 	a="lib"
 	libprefix=""
@@ -426,16 +478,27 @@ AC_SUBST([o])
 AC_SUBST([a])
 AC_SUBST([exe])
 AC_SUBST([libprefix])
+AC_SUBST([link_whole_archive])
 AC_SUBST([DSO_LDFLAGS])
 AC_SUBST([EXTRA_LDFLAGS])
 AC_SUBST([SOREV])
 AC_SUBST([PIC_CFLAGS])
 AC_SUBST([CTARGET])
 AC_SUBST([LDTARGET])
+AC_SUBST([TEST_LD_MODE])
 AC_SUBST([MKLIB])
 AC_SUBST([ARFLAGS])
 AC_SUBST([AROUT])
 AC_SUBST([CC_MM])
+
+dnl Determine whether libm must be linked to use e.g. log(3).
+AC_SEARCH_LIBS([log], [m], , [AC_MSG_ERROR([Missing math functions])])
+if test "x$ac_cv_search_log" != "xnone required" ; then
+  LM="$ac_cv_search_log"
+else
+  LM=
+fi
+AC_SUBST(LM)
 
 JE_COMPILABLE([__attribute__ syntax],
               [static __attribute__((unused)) void foo(void){}],
@@ -450,6 +513,7 @@ fi
 dnl Check for tls_model attribute support (clang 3.0 still lacks support).
 SAVED_CFLAGS="${CFLAGS}"
 JE_CFLAGS_APPEND([-Werror])
+JE_CFLAGS_APPEND([-herror_on_warning])
 JE_COMPILABLE([tls_model attribute], [],
               [static __thread int
                __attribute__((tls_model("initial-exec"), unused)) foo;
@@ -465,6 +529,7 @@ fi
 dnl Check for alloc_size attribute support.
 SAVED_CFLAGS="${CFLAGS}"
 JE_CFLAGS_APPEND([-Werror])
+JE_CFLAGS_APPEND([-herror_on_warning])
 JE_COMPILABLE([alloc_size attribute], [#include <stdlib.h>],
               [void *foo(size_t size) __attribute__((alloc_size(1)));],
               [je_cv_alloc_size])
@@ -475,6 +540,7 @@ fi
 dnl Check for format(gnu_printf, ...) attribute support.
 SAVED_CFLAGS="${CFLAGS}"
 JE_CFLAGS_APPEND([-Werror])
+JE_CFLAGS_APPEND([-herror_on_warning])
 JE_COMPILABLE([format(gnu_printf, ...) attribute], [#include <stdlib.h>],
               [void *foo(const char *format, ...) __attribute__((format(gnu_printf, 1, 2)));],
               [je_cv_format_gnu_printf])
@@ -485,6 +551,7 @@ fi
 dnl Check for format(printf, ...) attribute support.
 SAVED_CFLAGS="${CFLAGS}"
 JE_CFLAGS_APPEND([-Werror])
+JE_CFLAGS_APPEND([-herror_on_warning])
 JE_COMPILABLE([format(printf, ...) attribute], [#include <stdlib.h>],
               [void *foo(const char *format, ...) __attribute__((format(printf, 1, 2)));],
               [je_cv_format_printf])
@@ -879,9 +946,9 @@ fi
 AC_MSG_CHECKING([configured backtracing method])
 AC_MSG_RESULT([$backtrace_method])
 if test "x$enable_prof" = "x1" ; then
-  if test "x$abi" != "xpecoff"; then
-    dnl Heap profiling uses the log(3) function.
-    LIBS="$LIBS -lm"
+  dnl Heap profiling uses the log(3) function.
+  if test "x$LM" != "x" ; then
+    LIBS="$LIBS $LM"
   fi
 
   AC_DEFINE([JEMALLOC_PROF], [ ])
@@ -1049,6 +1116,23 @@ if test "x$enable_cache_oblivious" = "x1" ; then
   AC_DEFINE([JEMALLOC_CACHE_OBLIVIOUS], [ ])
 fi
 AC_SUBST([enable_cache_oblivious])
+
+
+
+JE_COMPILABLE([a program using __builtin_unreachable], [
+void foo (void) {
+  __builtin_unreachable();
+}
+], [
+	{
+		foo();
+	}
+], [je_cv_gcc_builtin_unreachable])
+if test "x${je_cv_gcc_builtin_unreachable}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_INTERNAL_UNREACHABLE], [__builtin_unreachable])
+else
+  AC_DEFINE([JEMALLOC_INTERNAL_UNREACHABLE], [abort])
+fi
 
 dnl ============================================================================
 dnl Check for  __builtin_ffsl(), then ffsl(3), and fail if neither are found.
@@ -1243,6 +1327,58 @@ CPPFLAGS="$CPPFLAGS -D_REENTRANT"
 
 dnl Check whether clock_gettime(2) is in libc or librt.
 AC_SEARCH_LIBS([clock_gettime], [rt])
+
+dnl Cray wrapper compiler often adds `-lrt` when using `-static`. Check with
+dnl `-dynamic` as well in case a user tries to dynamically link in jemalloc
+if test "x$je_cv_cray_prgenv_wrapper" = "xyes" ; then
+  if test "$ac_cv_search_clock_gettime" != "-lrt"; then
+    SAVED_CFLAGS="${CFLAGS}"
+
+    unset ac_cv_search_clock_gettime
+    JE_CFLAGS_APPEND([-dynamic])
+    AC_SEARCH_LIBS([clock_gettime], [rt])
+
+    CFLAGS="${SAVED_CFLAGS}"
+  fi
+fi
+
+dnl check for CLOCK_MONOTONIC_COARSE (Linux-specific).
+JE_COMPILABLE([clock_gettime(CLOCK_MONOTONIC_COARSE, ...)], [
+#include <time.h>
+], [
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+], [je_cv_clock_monotonic_coarse])
+if test "x${je_cv_clock_monotonic_coarse}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_CLOCK_MONOTONIC_COARSE])
+fi
+
+dnl check for CLOCK_MONOTONIC.
+JE_COMPILABLE([clock_gettime(CLOCK_MONOTONIC, ...)], [
+#include <unistd.h>
+#include <time.h>
+], [
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+#if !defined(_POSIX_MONOTONIC_CLOCK) || _POSIX_MONOTONIC_CLOCK < 0
+#  error _POSIX_MONOTONIC_CLOCK missing/invalid
+#endif
+], [je_cv_clock_monotonic])
+if test "x${je_cv_clock_monotonic}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_CLOCK_MONOTONIC])
+fi
+
+dnl Check for mach_absolute_time().
+JE_COMPILABLE([mach_absolute_time()], [
+#include <mach/mach_time.h>
+], [
+	mach_absolute_time();
+], [je_cv_mach_absolute_time])
+if test "x${je_cv_mach_absolute_time}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_MACH_ABSOLUTE_TIME])
+fi
 
 dnl Check if the GNU-specific secure_getenv function exists.
 AC_CHECK_FUNC([secure_getenv],
@@ -1744,6 +1880,7 @@ AC_MSG_RESULT([])
 AC_MSG_RESULT([CONFIG             : ${CONFIG}])
 AC_MSG_RESULT([CC                 : ${CC}])
 AC_MSG_RESULT([CFLAGS             : ${CFLAGS}])
+AC_MSG_RESULT([EXTRA_CFLAGS       : ${EXTRA_CFLAGS}])
 AC_MSG_RESULT([CPPFLAGS           : ${CPPFLAGS}])
 AC_MSG_RESULT([LDFLAGS            : ${LDFLAGS}])
 AC_MSG_RESULT([EXTRA_LDFLAGS      : ${EXTRA_LDFLAGS}])

@@ -356,6 +356,7 @@ nstime_idivide
 nstime_imultiply
 nstime_init
 nstime_init2
+nstime_monotonic
 nstime_ns
 nstime_nsec
 nstime_sec
@@ -397,6 +398,9 @@ pages_map
 pages_purge
 pages_trim
 pages_unmap
+pind2sz
+pind2sz_compute
+pind2sz_lookup
 pow2_ceil_u32
 pow2_ceil_u64
 pow2_ceil_zu
@@ -450,6 +454,8 @@ prof_thread_active_init_set
 prof_thread_active_set
 prof_thread_name_get
 prof_thread_name_set
+psz2ind
+psz2u
 purge_mode_names
 quarantine
 quarantine_alloc_hook
@@ -473,7 +479,6 @@ rtree_val_read
 rtree_val_write
 run_quantize_ceil
 run_quantize_floor
-run_quantize_max
 s2u
 s2u_compute
 s2u_lookup
