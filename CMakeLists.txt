@@ -591,7 +591,7 @@ set(C_UTIL_INTEGRATION_SRCS
 # when linking the whole JET library we get duplicate symbols
 # this is the it is done in the original makefile
 set(C_UTIL_INTEGRATION jemalloc_util_int_test${install_suffix})
-add_library(${C_UTIL_INTEGRATION} ${C_UTIL_INTEGRATION_SRCS})
+add_library(${C_UTIL_INTEGRATION} OBJECT ${C_UTIL_INTEGRATION_SRCS})
 
 set(C_UTIL_INTEGRATION_DEFS JEMALLOC_JET)
 if(with-jemalloc-prefix)
@@ -707,7 +707,7 @@ foreach(sourcefile ${TESTS_UNIT})
     string(REPLACE ".c" "" exename ${sourcefile})
     string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
     set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile})
+    add_executable(${exename} ${sourcefile}) 
     set_target_properties(${exename}
                PROPERTIES
                COMPILE_OPTIONS    # 
@@ -717,7 +717,7 @@ foreach(sourcefile ${TESTS_UNIT})
                COMPILE_DEFINITIONS 
                JEMALLOC_UNIT_TEST
     )
-    target_link_libraries(${exename} ${C_TESTLIB_UNIT} ${C_JETLIB} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
+    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_UNIT})
 endforeach(sourcefile ${TESTS_UNIT})
 
 
@@ -741,13 +741,13 @@ foreach(sourcefile ${TESTS_INTEGRATION})
     string(REPLACE ".c" "" exename ${sourcefile})
     string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
     set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile})
+    add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
     set_target_properties(${exename}
                PROPERTIES
                COMPILE_DEFINITIONS 
                JEMALLOC_INTEGRATION_TEST
     )
-    target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
+    target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCLIB})
 endforeach(sourcefile ${TESTS_UNIT})
 
 set(TESTS_STRESS
@@ -767,7 +767,7 @@ foreach(sourcefile ${TESTS_STRESS})
                LINK_FLAGS
                /FORCE:MULTIPLE  # Symbol clush between C_JETLIB and LIBJEMALLOCLIB
     )
-    target_link_libraries(${exename} ${C_TESTLIB_STRESS} ${C_JETLIB} ${C_UTIL_INTEGRATION} ${LIBJEMALLOCLIB})
+    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS} ${LIBJEMALLOCLIB})
 endforeach(sourcefile ${TESTS_UNIT})
 
 
