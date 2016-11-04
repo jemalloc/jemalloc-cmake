@@ -26,8 +26,13 @@ cmake_minimum_required (VERSION 3.4 FATAL_ERROR)
 # Set policy based on the CMake version
 cmake_policy(VERSION 3.4.3)
 
+if(POLICY CMP0042)
+  cmake_policy(SET CMP0042 NEW)
+endif()
+
 # The following config switches that mimic the original autoconf behavior are supported
 # use -D to define
+
 # 
 #  disable-munmap=1 disables unmapping for later reuse (default - enabled)
 #  with-mangling=k:v,k:v... comma separated list of key:value pairs overrides specific function mangling
@@ -58,6 +63,7 @@ project (${PACKAGE_NAME} C)
 
 include (CheckTypeSize)
 include (CheckIncludeFiles)
+include(CTest)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/Utilities.cmake)
 
@@ -189,13 +195,14 @@ endif()
 # Uppercase copy of the JEMALLOC_PREFIX
 # Need  quotes so the preprocessor concats two strings
 if(JEMALLOC_PREFIX)
-	string(TOUPPER \"${JEMALLOC_PREFIX}\" JEMALLOC_CPREFIX)
+    string(TOUPPER \"${JEMALLOC_PREFIX}\" JEMALLOC_CPREFIX)
 endif()
 
 # Disable exporting jemalloc public APIs
 # We need to define the var to whitespace string
 # as empty strings will not be defined in CMake
-set(without-export 1)
+# Non-empty definition is necessary so
+option(without-export "Disable exporting jemalloc public APIs" OFF)
 if(without-export)
     set(JEMALLOC_EXPORT " ")
 endif()
@@ -477,33 +484,6 @@ ConfigureFile("${CMAKE_CURRENT_SOURCE_DIR}/include/jemalloc/jemalloc_protos.h.in
 # revert
 set(je_ je_)
 
-# May want to replace  /d2Zi+ to /Zo
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
-
-# Separate line for warnings suppression mostly due to the fact we have ints 32 bits
-# - C4267 due to the fact we have ints 32 bits
-# - C4244 simular typedef unsigned szind_t
-# - C4146 alignment calculation applies negation to a unsigned type
-# - C4334 - result of 32-bit shift implicitly converted to 64 bits
-# - C4090 - some modifiable parameters are passed with a const qualifier
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244 /wd4146 /wd4334 /wd4090")
-
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /Od /RTC1 /Gm /MDd" )
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MD")
-
-# Make sure that PDBs are always generated
-# This somehow produces a warning.
-# set(CMAKE_STATIC_LINKER_FLAGS "${CMAKE_STATIC_LINKER_FLAGS} /DEBUG")
-
-add_definitions(-D_MBCS)
-
-include_directories(${PROJECT_SOURCE_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat)
-
-if(NOT HAVE_INTTYPES_H)
-  include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat/C99)
-endif()
-
 set(C_SRCS
   src/jemalloc.c
   src/arena.c
@@ -532,9 +512,12 @@ set(C_SRCS
   src/ticker.c
   src/tsd.c
   src/util.c
-  # src/zone.c # Darwin only file
   src/witness.c
 )
+
+if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    list(APPEND C_SRCS src/zone.c)
+endif()
 
 if(enable_valgrind)
     list(APPEND C_SRCS src/valgrind.c)
@@ -542,16 +525,57 @@ endif()
 
 # The original library, delivery product
 set(LIBJEMALLOCLIB jemalloc${install_suffix})
-add_library(${LIBJEMALLOCLIB} ${C_SRCS})
-set_target_properties(${LIBJEMALLOCLIB}
-           PROPERTIES
-           CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_DEBUG
-           ${PROJECT_BINARY_DIR}/Debug
-           CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_RELEASE
-           ${PROJECT_BINARY_DIR}/Release
-           COMPILE_PDB_NAME 
-           ${LIBJEMALLOCLIB}
-)
+add_library(${LIBJEMALLOCLIB} STATIC ${C_SRCS})
+
+# Now add shared library. Needed for integration tests
+# and a benchmark
+set(LIBJEMALLOCSO jemallocso${install_suffix})
+add_library(${LIBJEMALLOCSO} SHARED ${C_SRCS})
+
+if(WIN32)
+    # May want to replace  /d2Zi+ to /Zo
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
+
+    # Separate line for warnings suppression mostly due to the fact we have ints 32 bits
+    # - C4267 due to the fact we have ints 32 bits
+    # - C4244 simular typedef unsigned szind_t
+    # - C4146 alignment calculation applies negation to a unsigned type
+    # - C4334 - result of 32-bit shift implicitly converted to 64 bits
+    # - C4090 - some modifiable parameters are passed with a const qualifier
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244 /wd4146 /wd4334 /wd4090")
+
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /Od /RTC1 /Gm /MDd" )
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MD")
+
+    add_definitions(-D_MBCS)
+
+    include_directories(${PROJECT_SOURCE_DIR}/include)
+    include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat)
+
+    if(NOT HAVE_INTTYPES_H)
+      include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat/C99)
+    endif()
+
+    # Need full PDB for those who link to it
+    # MSVC does not generate full PDB for static libs by default
+    set_target_properties(${LIBJEMALLOCLIB}
+               PROPERTIES
+               COMPILE_DEFINITIONS
+               "JEMALLOC_EXPORT="
+               CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_DEBUG
+               ${PROJECT_BINARY_DIR}/Debug
+               CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_RELEASE
+               ${PROJECT_BINARY_DIR}/Release
+               COMPILE_PDB_NAME 
+               ${LIBJEMALLOCLIB}
+    )
+
+    # Need to export from DLL
+    set_target_properties(${LIBJEMALLOCSO}
+               PROPERTIES
+               COMPILE_DEFINITIONS DLLEXPORT)
+    
+endif()
 
 if(with-jemalloc-prefix)
  set_target_properties(${LIBJEMALLOCLIB}
@@ -559,17 +583,22 @@ if(with-jemalloc-prefix)
           COMPILE_DEFINITIONS 
           JEMALLOC_MANGLE
  )
+ 
+ set_target_properties(${LIBJEMALLOCSO}
+          PROPERTIES
+          COMPILE_DEFINITIONS 
+          JEMALLOC_MANGLE
+ )
 endif()
-
 
 ##################################################################
 ## Building tests
 
 # Rebuild for JET
 set(C_JETLIB jemalloc_jet${install_suffix})
-add_library(${C_JETLIB} ${C_SRCS})
+add_library(${C_JETLIB} STATIC ${C_SRCS})
 
-set(C_JETLIB_DEFS JEMALLOC_JET)
+set(C_JETLIB_DEFS "JEMALLOC_JET;JEMALLOC_EXPORT=")
 if(with-jemalloc-prefix)
    set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_MANGLE")
 endif()
@@ -580,20 +609,18 @@ set_target_properties(${C_JETLIB}
            "${C_JETLIB_DEFS}"
 )
 
+# Util integration
+# We need this library consisting from a single file
+# compiled with jet_ prefix for a benchmark
 set(C_UTIL_INTEGRATION_SRCS
     src/nstime.c
     src/util.c
 )
 
-# Util integration
-# We need this library consisting from a single file
-# compiled with jet_ prefix for a benchmark because
-# when linking the whole JET library we get duplicate symbols
-# this is the it is done in the original makefile
 set(C_UTIL_INTEGRATION jemalloc_util_int_test${install_suffix})
 add_library(${C_UTIL_INTEGRATION} OBJECT ${C_UTIL_INTEGRATION_SRCS})
 
-set(C_UTIL_INTEGRATION_DEFS JEMALLOC_JET)
+set(C_UTIL_INTEGRATION_DEFS "JEMALLOC_JET")
 if(with-jemalloc-prefix)
    set(C_UTIL_INTEGRATION_DEFS  "${C_UTIL_INTEGRATION_DEFS};JEMALLOC_MANGLE")
 endif()
@@ -603,9 +630,6 @@ set_target_properties(${C_UTIL_INTEGRATION}
            COMPILE_DEFINITIONS 
            "${C_UTIL_INTEGRATION_DEFS}"
 )
-
-# Form here onward
-include_directories(${PROJECT_SOURCE_DIR}/test/include)
 
 # C4018 signed/unsigned mismatch in timer.c
 set(COMMON_TESTLIB_CCFLAGS /wd4018)
@@ -624,11 +648,15 @@ set(C_TESTLIB_SRCS
 )
 
 # Unit tests test library
+# Unit test have access to all of the interfaces
+# and we link to a JET library thus JEMALLOC_JET is automatically
+# defined
 set(C_TESTLIB_UNIT jemalloc_unit_test${install_suffix})
-add_library(${C_TESTLIB_UNIT} ${C_TESTLIB_SRCS})
+add_library(${C_TESTLIB_UNIT}  STATIC ${C_TESTLIB_SRCS})
+target_include_directories(${C_TESTLIB_UNIT} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 
-set(C_TESTLIB_UNIT_DEFS JEMALLOC_UNIT_TEST)
-
+set(C_TESTLIB_UNIT_DEFS "JEMALLOC_UNIT_TEST;JEMALLOC_EXPORT=")
 set_target_properties(${C_TESTLIB_UNIT}
            PROPERTIES
            COMPILE_OPTIONS 
@@ -639,7 +667,9 @@ set_target_properties(${C_TESTLIB_UNIT}
 
 # Integration test library
 set(C_TESTLIB_INTEGRATION jemalloc_int_test${install_suffix})
-add_library(${C_TESTLIB_INTEGRATION} ${C_TESTLIB_SRCS})
+add_library(${C_TESTLIB_INTEGRATION} STATIC ${C_TESTLIB_SRCS})
+target_include_directories(${C_TESTLIB_INTEGRATION} PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 set_target_properties(${C_TESTLIB_INTEGRATION}
            PROPERTIES
            COMPILE_OPTIONS 
@@ -648,9 +678,12 @@ set_target_properties(${C_TESTLIB_INTEGRATION}
            JEMALLOC_INTEGRATION_TEST
 )
 
+# Benchmark
 # Stress test library
 set(C_TESTLIB_STRESS jemalloc_test_stress${install_suffix})
-add_library(${C_TESTLIB_STRESS} ${C_TESTLIB_SRCS})
+add_library(${C_TESTLIB_STRESS} STATIC ${C_TESTLIB_SRCS})
+target_include_directories(${C_TESTLIB_STRESS} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 set_target_properties(${C_TESTLIB_STRESS}
            PROPERTIES
            COMPILE_OPTIONS 
@@ -658,6 +691,31 @@ set_target_properties(${C_TESTLIB_STRESS}
            COMPILE_DEFINITIONS
            "JEMALLOC_STRESS_TEST;JEMALLOC_STRESS_TESTLIB"
 )
+
+set(TESTS_STRESS
+    test/stress/microbench.c
+)
+
+# Build Stress tests
+# This consumes and links to C_JETLIB
+foreach(sourcefile ${TESTS_STRESS})
+    get_filename_component(exename ${sourcefile} NAME_WE)
+    set(exename "${exename}${install_suffix}")
+    add_executable(${exename} ${sourcefile})
+    target_include_directories(${exename} PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
+    set_target_properties(${exename}
+               PROPERTIES
+               COMPILE_DEFINITIONS 
+               JEMALLOC_STRESS_TEST
+#               LINK_FLAGS
+#               /FORCE:MULTIPLE  # Symbol clush between C_JETLIB and LIBJEMALLOCLIB
+    )
+    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS} ${LIBJEMALLOCSO})
+endforeach(sourcefile ${TESTS_UNIT})
+
+enable_testing()
+add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
 
 set(TESTS_UNIT
     test/unit/a0.c
@@ -703,21 +761,25 @@ set(TESTS_UNIT
 )
 
 # Build Unit tests
+# This links to exported C_JETLIB static version of the library
 foreach(sourcefile ${TESTS_UNIT})
-    string(REPLACE ".c" "" exename ${sourcefile})
-    string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
+    get_filename_component(exename ${sourcefile} NAME_WE)
     set(exename "${exename}${install_suffix}")
     add_executable(${exename} ${sourcefile}) 
+    target_include_directories(${exename} PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
     set_target_properties(${exename}
                PROPERTIES
-               COMPILE_OPTIONS    # 
-               # test\unit\math.c(202): warning C4056: overflow in floating-point constant arithmetic (only VS 13)
+               COMPILE_OPTIONS
                # test\unit\tsd.c: 4312: bitmap signed/unsigned
-               "${COMMON_TESTLIB_CCFLAGS};/wd4312;/wd4056"
+               "${COMMON_TESTLIB_CCFLAGS};/wd4312"
                COMPILE_DEFINITIONS 
-               JEMALLOC_UNIT_TEST
+               "JEMALLOC_UNIT_TEST;JEMALLOC_EXPORT="
+
     )
     target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_UNIT})
+    add_test(NAME ${exename} COMMAND ${exename})
+    add_dependencies(check ${exename})
 endforeach(sourcefile ${TESTS_UNIT})
 
 
@@ -737,37 +799,19 @@ set(TESTS_INTEGRATION
 )
 
 # Build integration tests
-foreach(sourcefile ${TESTS_INTEGRATION})
-    string(REPLACE ".c" "" exename ${sourcefile})
-    string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
-    set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
-    set_target_properties(${exename}
-               PROPERTIES
-               COMPILE_DEFINITIONS 
-               JEMALLOC_INTEGRATION_TEST
-    )
-    target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCLIB})
-endforeach(sourcefile ${TESTS_UNIT})
-
-set(TESTS_STRESS
-    test/stress/microbench.c
-)
-
-# Build Stress tests
-foreach(sourcefile ${TESTS_STRESS})
-    string(REPLACE ".c" "" exename ${sourcefile})
-    string(REGEX REPLACE "^((.+)/)+" "" exename ${exename})
-    set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile})
-    set_target_properties(${exename}
-               PROPERTIES
-               COMPILE_DEFINITIONS 
-               JEMALLOC_STRESS_TEST
-               LINK_FLAGS
-               /FORCE:MULTIPLE  # Symbol clush between C_JETLIB and LIBJEMALLOCLIB
-    )
-    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS} ${LIBJEMALLOCLIB})
-endforeach(sourcefile ${TESTS_UNIT})
-
+# This links to SO library
+# foreach(sourcefile ${TESTS_INTEGRATION})
+    # get_filename_component(exename ${sourcefile} NAME_WE)
+    # set(exename "${exename}${install_suffix}")
+    # #add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
+    # add_executable(${exename} ${sourcefile})
+    # set_target_properties(${exename}
+               # PROPERTIES
+               # COMPILE_DEFINITIONS 
+               # JEMALLOC_INTEGRATION_TEST
+    # )
+    # target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCSO})
+    # add_test(NAME ${exename} COMMAND ${exename})
+    # add_dependencies(check ${exename})
+# endforeach(sourcefile ${TESTS_UNIT})
 
