@@ -572,10 +572,11 @@ if(WIN32)
                ${LIBJEMALLOCLIB}
     )
 
-    # Need to export from DLL
-    target_compile_definitions(${LIBJEMALLOCSO} PRIVATE
-        DLLEXPORT)
 endif()
+
+# Need to export from DLL
+target_compile_definitions(${LIBJEMALLOCSO} PRIVATE
+    DLLEXPORT)
 
 if(with-jemalloc-prefix)
     target_compile_definitions(${LIBJEMALLOCLIB} PRIVATE
@@ -591,11 +592,16 @@ endif()
 # Compose compiler defs and options for the tests
 
 set(C_JETLIB_DEFS "JEMALLOC_JET")
-set(C_UTIL_INTEGRATION_DEFS "JEMALLOC_JET")
+set(C_UTIL_INTEGRATION_DEFS "")
 set(C_TESTLIB_INTEGRATION_DEFS "JEMALLOC_INTEGRATION_TEST")
 set(C_TESTLIB_UNIT_DEFS "JEMALLOC_UNIT_TEST")
 set(C_TESTLIB_STRESS_DEF "JEMALLOC_STRESS_TEST;JEMALLOC_STRESS_TESTLIB")
 set(C_UNITETEST_DEFS "JEMALLOC_UNIT_TEST")
+
+if(with-jemalloc-prefix)
+   set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_MANGLE")
+   set(C_UTIL_INTEGRATION_DEFS "${C_UTIL_INTEGRATION_DEFS};JEMALLOC_MANGLE")
+endif()
 
 # Add empty definition of JEMALLOC_EXPORT as we use them in
 # static form on other platforms it is empty defined by default but
@@ -609,11 +615,6 @@ if(MSVC)
     
     # C4018 signed/unsigned mismatch in timer.c
     set(COMMON_TESTLIB_CCFLAGS /wd4018)
-endif()
-
-if(with-jemalloc-prefix)
-   set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_MANGLE")
-   set(C_UTIL_INTEGRATION_DEFS  "${C_UTIL_INTEGRATION_DEFS};JEMALLOC_MANGLE")
 endif()
 
 ###################################################
@@ -633,8 +634,10 @@ set(C_UTIL_INTEGRATION_SRCS
 
 set(C_UTIL_INTEGRATION jemalloc_util_int_test${install_suffix})
 add_library(${C_UTIL_INTEGRATION} OBJECT ${C_UTIL_INTEGRATION_SRCS})
-target_compile_definitions(${C_UTIL_INTEGRATION} PRIVATE
-    "${C_UTIL_INTEGRATION_DEFS}")
+if(C_UTIL_INTEGRATION_DEFS)
+    target_compile_definitions(${C_UTIL_INTEGRATION} PRIVATE
+        "${C_UTIL_INTEGRATION_DEFS}")
+endif()
 
 ##################################################################
 # Common source for Unit, Integration and stress test libraries
@@ -706,7 +709,7 @@ set(TESTS_STRESS
     test/stress/microbench.c
 )
 
-# Build Stress tests
+# Build benchmark
 # This consumes C_JETLIB, Link to SO
 foreach(sourcefile ${TESTS_STRESS})
     get_filename_component(exename ${sourcefile} NAME_WE)
@@ -719,11 +722,16 @@ foreach(sourcefile ${TESTS_STRESS})
     target_compile_definitions(${exename} PRIVATE
             JEMALLOC_STRESS_TEST)
 
-    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS} ${LIBJEMALLOCSO})
+    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS}
+        ${LIBJEMALLOCSO})
 endforeach(sourcefile ${TESTS_UNIT})
 
 enable_testing()
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
+
+################################################################
+# Build Unit tests
+# This links to exported C_JETLIB static version of the library
 
 set(TESTS_UNIT
     test/unit/a0.c
@@ -767,9 +775,6 @@ set(TESTS_UNIT
     test/unit/witness.c
     test/unit/zero.c
 )
-
-# Build Unit tests
-# This links to exported C_JETLIB static version of the library
 
 # Turn off warnings
 # test\unit\tsd.c: 4312: bitmap signed/unsigned
@@ -818,20 +823,23 @@ set(TESTS_INTEGRATION
     test/integration/chunk.c
 )
 
+#######################################################################
 # Build integration tests
-# This links to SO library
-# foreach(sourcefile ${TESTS_INTEGRATION})
-    # get_filename_component(exename ${sourcefile} NAME_WE)
-    # set(exename "${exename}${install_suffix}")
-    # #add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
-    # add_executable(${exename} ${sourcefile})
-    # set_target_properties(${exename}
-               # PROPERTIES
-               # COMPILE_DEFINITIONS 
-               # JEMALLOC_INTEGRATION_TEST
-    # )
-    # target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCSO})
-    # add_test(NAME ${exename} COMMAND ${exename})
-    # add_dependencies(check ${exename})
-# endforeach(sourcefile ${TESTS_UNIT})
+# This links to SO library and UTIL_INTEGRATION
+foreach(sourcefile ${TESTS_INTEGRATION})
+    get_filename_component(exename ${sourcefile} NAME_WE)
+    set(exename "${exename}${install_suffix}")
+    add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
+
+    target_include_directories(${exename} PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
+    
+    target_compile_definitions(${exename} PRIVATE
+            JEMALLOC_INTEGRATION_TEST)
+    
+    target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCSO})
+
+    add_test(NAME ${exename} COMMAND ${exename})
+    add_dependencies(check ${exename})
+endforeach(sourcefile ${TESTS_UNIT})
 
