@@ -53,15 +53,16 @@ option(disable-cache-oblivious "Disable uniform distribution of large allocation
 #  with-lg-page=<lg2 of the page size> override system page size
 #  with-lg-page-sizes=<comma separated list of lg2 pages sizes> Base 2 logs of system page sizes to support
 #  with-lg_size-class-group=<Base 2 log of size classes per doubling> default 2
-#  NOT SUPPORTED enable-lazy-lock
-  
+option(enable-lazy-lock "Enable lazy locking (only lock when multi-threaded" OFF)
+option(force_lazy_lock "Forcing lazy-lock to avoid allocator/threading bootstrap issues" OFF)
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
 
 include (CheckTypeSize)
 include (CheckIncludeFiles)
-include(CTest)
+include (CheckCSourceCompiles)
+include (CTest)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/Utilities.cmake)
 
@@ -82,7 +83,10 @@ GetAndParseVersion()
 
 CHECK_INCLUDE_FILES (alloca.h JEMALLOC_HAS_ALLOCA_H)
 
-# whether malloc_usable_size definition can use const argument
+# TODO Determine abi
+set(abi "elf")
+
+# Whether malloc_usable_size definition can use const argument
 CHECK_INCLUDE_FILES (malloc.h HAVE_MALLOC_H)
 if(HAVE_MALLOC_H)
     set(JEMALLOC_USABLE_SIZE_CONST const)
@@ -331,17 +335,63 @@ if(with-lg-size-class-group)
   set (LG_SIZE_CLASS_GROUP ${with-lg-size-class-group})
 endif()
 
-# secure_getenv
-set(JEMALLOC_HAVE_SECURE_GETENV 0)
+if(NOT WIN32)
+# Check if syscall(2) is usable.  Treat warnings as errors, so that e.g. OS X
+# 10.12's deprecation warning prevents use.
+  # set(CMAKE_REQUIRED_FLAGS  "${CMAKE_C_FLAGS} -Werror")
+  CHECK_C_SOURCE_COMPILES("
+    #include <sys/syscall.h>
+    #include <unistd.h>
+    syscall(SYS_write, 2, \"hello\", 5);
+    " HAVE_SYSCALL)
+
+  if(HAVE_SYSCALL)
+    set(JEMALLOC_HAVE_SYSCALL 1)
+  endif()
+
+  CHECK_FUNCTION_EXISTS(secure_getenv HAVE_SECURE_GETENV)
+  if(HAVE_SECURE_GETENV)
+    set(JEMALLOC_HAVE_SECURE_GETENV 1)
+  endif()
+  
+endif()
 
 set(JEMALLOC_HAVE_ISSETUGID 0)
 set(JEMALLOC_MALLOC_THREAD_CLEANUP 0)
 
 set(JEMALLOC_MUTEX_INIT_CB 0)
 
-# No lazy lock since there is a way in Windows
-# to bootstrap for sure
+############################
+# enable-lazy-lock
 set(JEMALLOC_LAZY_LOCK 0)
+if(NOT enable-lazy-lock)
+   if(force_lazy_lock)
+      message(STATUS "Forcing lazy-lock to avoid allocator/threading bootstrap issues")
+      set(enable-lazy-lock ON)
+  endif()
+endif()
+
+if(enable-lazy-lock)
+  if(${abi} STREQUAL "pecoff")
+      message(STATUS "Forcing no lazy-lock because thread creation monitoring is unimplemented")
+      set(enable-lazy-lock OFF)
+  endif()
+endif()
+
+if(enable-lazy-lock)
+  CHECK_INCLUDE_FILES (dlfcn.h HAVE_DLFCN_H)
+  if(NOT HAVE_DLFCN_H)
+    message(FATAL_ERROR "dlfcn.h is missing")
+  endif()
+  
+  set(CMAKE_REQUIRED_LIBRARIES "dl")
+  CHECK_FUNCTION_EXISTS(dlsym HAVE_DLSYM)
+  if(NOT HAVE_DLSYM)
+    message(FATAL_ERROR "libdl is missing]")
+  endif()
+endif()
+
+#########################
 
 # Separate clause for _WIN32 does the right thing
 # So TLS is enabled for Windows
@@ -349,6 +399,7 @@ set(JEMALLOC_TLS 0)
 
 # Relevant for FreeBSD only
 set(JEMALLOC_ATOMIC9 0)
+
 # Only for iOS
 set(JEMALLOC_OSATOMIC 0)
 set(JEMALLOC_OSSPIN 0)
@@ -511,11 +562,11 @@ set(C_SRCS
 )
 
 if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-    list(APPEND C_SRCS src/zone.c)
+  list(APPEND C_SRCS src/zone.c)
 endif()
 
 if(enable_valgrind)
-    list(APPEND C_SRCS src/valgrind.c)
+  list(APPEND C_SRCS src/valgrind.c)
 endif()
 
 # The original library, delivery product
@@ -528,44 +579,44 @@ set(LIBJEMALLOCSO jemallocso${install_suffix})
 add_library(${LIBJEMALLOCSO} SHARED ${C_SRCS})
 
 if(WIN32)
-    # May want to replace  /d2Zi+ to /Zo
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
+  # May want to replace  /d2Zi+ to /Zo
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /FC /d2Zi+ /Zi /FS /nologo /W3 /WX /GS /Zc:wchar_t /Zc:forScope /errorReport:queue")
 
-    # Separate line for warnings suppression mostly due to the fact we have ints 32 bits
-    # - C4267 due to the fact we have ints 32 bits
-    # - C4244 simular typedef unsigned szind_t
-    # - C4146 alignment calculation applies negation to a unsigned type
-    # - C4334 - result of 32-bit shift implicitly converted to 64 bits
-    # - C4090 - some modifiable parameters are passed with a const qualifier
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244 /wd4146 /wd4334 /wd4090")
+  # Separate line for warnings suppression mostly due to the fact we have ints 32 bits
+  # - C4267 due to the fact we have ints 32 bits
+  # - C4244 simular typedef unsigned szind_t
+  # - C4146 alignment calculation applies negation to a unsigned type
+  # - C4334 - result of 32-bit shift implicitly converted to 64 bits
+  # - C4090 - some modifiable parameters are passed with a const qualifier
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244 /wd4146 /wd4334 /wd4090")
 
-    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /Od /RTC1 /Gm /MDd" )
-    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MD")
+  set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /Od /RTC1 /Gm /MDd" )
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oxt /Zp8 /Gm- /Gy /MD")
 
-    add_definitions(-D_MBCS)
+  add_definitions(-D_MBCS)
 
-    include_directories(${PROJECT_SOURCE_DIR}/include)
-    include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat)
+  include_directories(${PROJECT_SOURCE_DIR}/include)
+  include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat)
 
-    if(NOT HAVE_INTTYPES_H)
-      include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat/C99)
-    endif()
+  if(NOT HAVE_INTTYPES_H)
+    include_directories(${PROJECT_SOURCE_DIR}/include/msvc_compat/C99)
+  endif()
 
-    # Need full PDB for those who link to it
-    # MSVC does not generate full PDB for static libs by default
-    # and disable export from the DLL otherwise JEMALLOC_EXPORT becomes
-    # either impport or export which is both wrong for a static library
-    set_target_properties(${LIBJEMALLOCLIB}
-               PROPERTIES
-               COMPILE_DEFINITIONS
-               "JEMALLOC_EXPORT="
-               CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_DEBUG
-               ${PROJECT_BINARY_DIR}/Debug
-               CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_RELEASE
-               ${PROJECT_BINARY_DIR}/Release
-               COMPILE_PDB_NAME 
-               ${LIBJEMALLOCLIB}
-    )
+  # Need full PDB for those who link to it
+  # MSVC does not generate full PDB for static libs by default
+  # and disable export from the DLL otherwise JEMALLOC_EXPORT becomes
+  # either impport or export which is both wrong for a static library
+  set_target_properties(${LIBJEMALLOCLIB}
+           PROPERTIES
+           COMPILE_DEFINITIONS
+           "JEMALLOC_EXPORT="
+           CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_DEBUG
+           ${PROJECT_BINARY_DIR}/Debug
+           CMAKE_COMPILE_PDB_OUTPUT_DIRECTORY_RELEASE
+           ${PROJECT_BINARY_DIR}/Release
+           COMPILE_PDB_NAME 
+           ${LIBJEMALLOCLIB}
+  )
 
 endif()
 
@@ -574,11 +625,11 @@ target_compile_definitions(${LIBJEMALLOCSO} PRIVATE
     DLLEXPORT)
 
 if(with-jemalloc-prefix)
-    target_compile_definitions(${LIBJEMALLOCLIB} PRIVATE
-        JEMALLOC_MANGLE)
- 
-    target_compile_definitions(${LIBJEMALLOCSO} PRIVATE
-        JEMALLOC_MANGLE)
+  target_compile_definitions(${LIBJEMALLOCLIB} PRIVATE
+      JEMALLOC_MANGLE)
+
+  target_compile_definitions(${LIBJEMALLOCSO} PRIVATE
+      JEMALLOC_MANGLE)
 endif()
 
 ##################################################################
@@ -594,22 +645,22 @@ set(C_TESTLIB_STRESS_DEF "JEMALLOC_STRESS_TEST;JEMALLOC_STRESS_TESTLIB")
 set(C_UNITETEST_DEFS "JEMALLOC_UNIT_TEST")
 
 if(with-jemalloc-prefix)
-   set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_MANGLE")
-   set(C_UTIL_INTEGRATION_DEFS "${C_UTIL_INTEGRATION_DEFS};JEMALLOC_MANGLE")
+ set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_MANGLE")
+ set(C_UTIL_INTEGRATION_DEFS "${C_UTIL_INTEGRATION_DEFS};JEMALLOC_MANGLE")
 endif()
 
 # Add empty definition of JEMALLOC_EXPORT as we use them in
 # static form on other platforms it is empty defined by default but
 # not on windows
 if(MSVC)
-    set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_EXPORT=")
-    set(C_TESTLIB_INTEGRATION_DEFS "${C_TESTLIB_INTEGRATION_DEFS};JEMALLOC_EXPORT=")
-    set(C_TESTLIB_UNIT_DEFS "${C_TESTLIB_UNIT_DEFS};JEMALLOC_EXPORT=")
-    set(C_TESTLIB_STRESS_DEF "${C_TESTLIB_STRESS_DEF};JEMALLOC_EXPORT=")
-    set(C_UNITETEST_DEFS "${C_UNITETEST_DEFS};JEMALLOC_EXPORT=")
-    
-    # C4018 signed/unsigned mismatch in timer.c
-    set(COMMON_TESTLIB_CCFLAGS /wd4018)
+  set(C_JETLIB_DEFS  "${C_JETLIB_DEFS};JEMALLOC_EXPORT=")
+  set(C_TESTLIB_INTEGRATION_DEFS "${C_TESTLIB_INTEGRATION_DEFS};JEMALLOC_EXPORT=")
+  set(C_TESTLIB_UNIT_DEFS "${C_TESTLIB_UNIT_DEFS};JEMALLOC_EXPORT=")
+  set(C_TESTLIB_STRESS_DEF "${C_TESTLIB_STRESS_DEF};JEMALLOC_EXPORT=")
+  set(C_UNITETEST_DEFS "${C_UNITETEST_DEFS};JEMALLOC_EXPORT=")
+  
+  # C4018 signed/unsigned mismatch in timer.c
+  set(COMMON_TESTLIB_CCFLAGS /wd4018)
 endif()
 
 ###################################################
@@ -660,8 +711,8 @@ target_include_directories(${C_TESTLIB_UNIT} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 
 if(COMMON_TESTLIB_CCFLAGS)
-    target_compile_options(${C_TESTLIB_UNIT} PRIVATE
-        "${COMMON_TESTLIB_CCFLAGS}")
+  target_compile_options(${C_TESTLIB_UNIT} PRIVATE
+      "${COMMON_TESTLIB_CCFLAGS}")
 endif()
 
 target_compile_definitions(${C_TESTLIB_UNIT} PRIVATE
@@ -675,8 +726,8 @@ target_include_directories(${C_TESTLIB_INTEGRATION} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 
 if(COMMON_TESTLIB_CCFLAGS)
-    target_compile_options(${C_TESTLIB_INTEGRATION} PRIVATE
-        "${COMMON_TESTLIB_CCFLAGS}")
+  target_compile_options(${C_TESTLIB_INTEGRATION} PRIVATE
+      "${COMMON_TESTLIB_CCFLAGS}")
 endif()
 
 target_compile_definitions(${C_TESTLIB_INTEGRATION} PRIVATE
@@ -691,8 +742,8 @@ target_include_directories(${C_TESTLIB_STRESS} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 
 if(COMMON_TESTLIB_CCFLAGS)
-    target_compile_options(${C_TESTLIB_STRESS} PRIVATE
-        "${COMMON_TESTLIB_CCFLAGS}")
+  target_compile_options(${C_TESTLIB_STRESS} PRIVATE
+      "${COMMON_TESTLIB_CCFLAGS}")
 endif()
 
 target_compile_definitions(${C_TESTLIB_STRESS} PRIVATE
@@ -707,18 +758,18 @@ set(TESTS_STRESS
 # Build benchmark
 # This consumes C_JETLIB, Link to SO
 foreach(sourcefile ${TESTS_STRESS})
-    get_filename_component(exename ${sourcefile} NAME_WE)
-    set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile})
-    
-    target_include_directories(${exename} PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
+  get_filename_component(exename ${sourcefile} NAME_WE)
+  set(exename "${exename}${install_suffix}")
+  add_executable(${exename} ${sourcefile})
+  
+  target_include_directories(${exename} PRIVATE 
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 
-    target_compile_definitions(${exename} PRIVATE
-            JEMALLOC_STRESS_TEST)
+  target_compile_definitions(${exename} PRIVATE
+          JEMALLOC_STRESS_TEST)
 
-    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS}
-        ${LIBJEMALLOCSO})
+  target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_STRESS}
+      ${LIBJEMALLOCSO})
 endforeach(sourcefile ${TESTS_UNIT})
 
 enable_testing()
@@ -775,31 +826,31 @@ set(TESTS_UNIT
 # test\unit\tsd.c: 4312: bitmap signed/unsigned
 set(C_UNIT_TEST_CFLAGS ${COMMON_TESTLIB_CCFLAGS})
 if(MSVC)
-    set(C_UNIT_TEST_CFLAGS "${C_UNIT_TEST_CFLAGS};/wd4312")
+  set(C_UNIT_TEST_CFLAGS "${C_UNIT_TEST_CFLAGS};/wd4312")
 endif()
 
 foreach(sourcefile ${TESTS_UNIT})
-    get_filename_component(exename ${sourcefile} NAME_WE)
-    set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile}) 
-    
-    target_include_directories(${exename} PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
+  get_filename_component(exename ${sourcefile} NAME_WE)
+  set(exename "${exename}${install_suffix}")
+  add_executable(${exename} ${sourcefile}) 
+  
+  target_include_directories(${exename} PRIVATE 
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
 
-    if(C_UNIT_TEST_CFLAGS)
-        target_compile_options(${exename} PRIVATE
-            "${C_UNIT_TEST_CFLAGS}")
-    endif()
-    
-    set_target_properties(${exename}
-               PROPERTIES
-               COMPILE_DEFINITIONS 
-               "${C_UNITETEST_DEFS}"
-    )
-    
-    target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_UNIT})
-    add_test(NAME ${exename} COMMAND ${exename})
-    add_dependencies(check ${exename})
+  if(C_UNIT_TEST_CFLAGS)
+      target_compile_options(${exename} PRIVATE
+          "${C_UNIT_TEST_CFLAGS}")
+  endif()
+  
+  set_target_properties(${exename}
+             PROPERTIES
+             COMPILE_DEFINITIONS 
+             "${C_UNITETEST_DEFS}"
+  )
+  
+  target_link_libraries(${exename} ${C_JETLIB} ${C_TESTLIB_UNIT})
+  add_test(NAME ${exename} COMMAND ${exename})
+  add_dependencies(check ${exename})
 endforeach(sourcefile ${TESTS_UNIT})
 
 
@@ -822,19 +873,19 @@ set(TESTS_INTEGRATION
 # Build integration tests
 # This links to SO library and UTIL_INTEGRATION
 foreach(sourcefile ${TESTS_INTEGRATION})
-    get_filename_component(exename ${sourcefile} NAME_WE)
-    set(exename "${exename}${install_suffix}")
-    add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
+  get_filename_component(exename ${sourcefile} NAME_WE)
+  set(exename "${exename}${install_suffix}")
+  add_executable(${exename} ${sourcefile} $<TARGET_OBJECTS:${C_UTIL_INTEGRATION}>)
 
-    target_include_directories(${exename} PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
-    
-    target_compile_definitions(${exename} PRIVATE
-            JEMALLOC_INTEGRATION_TEST)
-    
-    target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCSO})
+  target_include_directories(${exename} PRIVATE 
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/include)
+  
+  target_compile_definitions(${exename} PRIVATE
+          JEMALLOC_INTEGRATION_TEST)
+  
+  target_link_libraries(${exename} ${C_TESTLIB_INTEGRATION} ${LIBJEMALLOCSO})
 
-    add_test(NAME ${exename} COMMAND ${exename})
-    add_dependencies(check ${exename})
+  add_test(NAME ${exename} COMMAND ${exename})
+  add_dependencies(check ${exename})
 endforeach(sourcefile ${TESTS_UNIT})
 
