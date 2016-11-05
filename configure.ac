@@ -171,9 +171,15 @@ fi
 if test "x$CFLAGS" = "x" ; then
   no_CFLAGS="yes"
   if test "x$GCC" = "xyes" ; then
-    JE_CFLAGS_APPEND([-std=gnu99])
-    if test "x$je_cv_cflags_appended" = "x-std=gnu99" ; then
+dnl    JE_CFLAGS_APPEND([-std=gnu99])
+    JE_CFLAGS_APPEND([-std=gnu11])
+    if test "x$je_cv_cflags_appended" = "x-std=gnu11" ; then
       AC_DEFINE_UNQUOTED([JEMALLOC_HAS_RESTRICT])
+    else
+      JE_CFLAGS_APPEND([-std=gnu99])
+      if test "x$je_cv_cflags_appended" = "x-std=gnu99" ; then
+        AC_DEFINE_UNQUOTED([JEMALLOC_HAS_RESTRICT])
+      fi
     fi
     JE_CFLAGS_APPEND([-Wall])
     JE_CFLAGS_APPEND([-Werror=declaration-after-statement])
@@ -379,7 +385,7 @@ case "${host}" in
 	AC_DEFINE([JEMALLOC_PURGE_MADVISE_FREE], [ ])
 	;;
   *-*-linux*)
-	dnl secure_getenv() is exposed by _GNU_SOURCE.
+	dnl syscall(2) and secure_getenv(3) are exposed by _GNU_SOURCE.
 	CPPFLAGS="$CPPFLAGS -D_GNU_SOURCE"
 	abi="elf"
 	AC_DEFINE([JEMALLOC_HAS_ALLOCA_H])
@@ -1380,6 +1386,22 @@ if test "x${je_cv_mach_absolute_time}" = "xyes" ; then
   AC_DEFINE([JEMALLOC_HAVE_MACH_ABSOLUTE_TIME])
 fi
 
+dnl Check if syscall(2) is usable.  Treat warnings as errors, so that e.g. OS X
+dnl 10.12's deprecation warning prevents use.
+SAVED_CFLAGS="${CFLAGS}"
+JE_CFLAGS_APPEND([-Werror])
+JE_COMPILABLE([syscall(2)], [
+#include <sys/syscall.h>
+#include <unistd.h>
+], [
+	syscall(SYS_write, 2, "hello", 5);
+],
+              [je_cv_syscall])
+CFLAGS="${SAVED_CFLAGS}"
+if test "x$je_cv_syscall" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_HAVE_SYSCALL], [ ])
+fi
+
 dnl Check if the GNU-specific secure_getenv function exists.
 AC_CHECK_FUNC([secure_getenv],
               [have_secure_getenv="1"],
@@ -1434,9 +1456,17 @@ fi
 ],
 [enable_lazy_lock=""]
 )
-if test "x$enable_lazy_lock" = "x" -a "x${force_lazy_lock}" = "x1" ; then
-  AC_MSG_RESULT([Forcing lazy-lock to avoid allocator/threading bootstrap issues])
-  enable_lazy_lock="1"
+if test "x${enable_lazy_lock}" = "x" ; then
+  if test "x${force_lazy_lock}" = "x1" ; then
+    AC_MSG_RESULT([Forcing lazy-lock to avoid allocator/threading bootstrap issues])
+    enable_lazy_lock="1"
+  else
+    enable_lazy_lock="0"
+  fi
+fi
+if test "x${enable_lazy_lock}" = "x1" -a "x${abi}" = "xpecoff" ; then
+  AC_MSG_RESULT([Forcing no lazy-lock because thread creation monitoring is unimplemented])
+  enable_lazy_lock="0"
 fi
 if test "x$enable_lazy_lock" = "x1" ; then
   if test "x$abi" != "xpecoff" ; then
@@ -1447,8 +1477,6 @@ if test "x$enable_lazy_lock" = "x1" ; then
       ])
   fi
   AC_DEFINE([JEMALLOC_LAZY_LOCK], [ ])
-else
-  enable_lazy_lock="0"
 fi
 AC_SUBST([enable_lazy_lock])
 
@@ -1634,6 +1662,20 @@ AC_CACHE_CHECK([for __builtin_clz],
 
 if test "x${je_cv_builtin_clz}" = "xyes" ; then
   AC_DEFINE([JEMALLOC_HAVE_BUILTIN_CLZ], [ ])
+fi
+
+dnl ============================================================================
+dnl Check for os_unfair_lock operations as provided on Darwin.
+
+JE_COMPILABLE([Darwin os_unfair_lock_*()], [
+#include <os/lock.h>
+], [
+	os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
+	os_unfair_lock_lock(&lock);
+	os_unfair_lock_unlock(&lock);
+], [je_cv_os_unfair_lock])
+if test "x${je_cv_os_unfair_lock}" = "xyes" ; then
+  AC_DEFINE([JEMALLOC_OS_UNFAIR_LOCK], [ ])
 fi
 
 dnl ============================================================================
