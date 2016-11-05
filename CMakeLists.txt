@@ -31,32 +31,30 @@ if(POLICY CMP0042)
 endif()
 
 # The following config switches that mimic the original autoconf behavior are supported
-# use -D to define
-
-# 
-#  disable-munmap=1 disables unmapping for later reuse (default - enabled)
+# use -D to define cmd arguments, options may have values of ON/OFF
+option(disable-munmap "Disables unmapping for later reuse (default - enabled)" OFF )
 #  with-mangling=k:v,k:v... comma separated list of key:value pairs overrides specific function mangling
 #  with-jemalloc-prefix=<prefix> override default je_ prefix
-#  without-export=1 - disable export of public APIs
+option(without-export "Ddisable export of public APIs" OFF)
 #  with-private-namespace=<additional_prefix>
 #  with-install-suffix=<suffix> added to public headers and the library
 #  with-malloc-conf=lg_chunk:18 Embed <malloc_conf> as a run-time options string that is processed prior to
 #       the malloc_conf global variable
-#  disable-cc-silence=1 disable compiler silencing code
-#  enable-debug=1 Enable debugging code
-#  enable-ivsalloc=1 Validate pub API pointers
-#  disable-stats=1 Disable stats calculation (on by default)
-#  disable-tcache=1 Disable thread-specific caching (on by default)
-#  disable-fill=1 disabling filling memory with junk on by default
-#  enable-xmalloc=1 support xmalloc option
-#  disable-cache-oblivious=1 Disable uniform distribution of large allocations
+option(disable-cc-silence "Disable compiler silencing code" OFF)
+option(enable-debug "Enable debugging code" OFF)
+option(enable-ivsalloc "Validate pub API pointers" OFF)
+option(disable-stats "Disable stats calculation (on by default)" OFF)
+option(disable-tcache "Disable thread-specific caching (on by default)" OFF)
+option(disable-fill  "Disabling filling memory with junk on by default" OFF)
+option(enable-xmalloc "Support xmalloc option" OFF)
+option(disable-cache-oblivious "Disable uniform distribution of large allocations" OFF)
 #  with-lg-tiny-min=<lg2 value> override default value of 3 of lg2 minimum tiny clas size
 #  with-lg-quantum=<lg2 of the min allocation alignment>
 #  with-lg-page=<lg2 of the page size> override system page size
 #  with-lg-page-sizes=<comma separated list of lg2 pages sizes> Base 2 logs of system page sizes to support
 #  with-lg_size-class-group=<Base 2 log of size classes per doubling> default 2
 #  NOT SUPPORTED enable-lazy-lock
-#  
+  
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
@@ -202,7 +200,6 @@ endif()
 # We need to define the var to whitespace string
 # as empty strings will not be defined in CMake
 # Non-empty definition is necessary so
-option(without-export "Disable exporting jemalloc public APIs" OFF)
 if(without-export)
     set(JEMALLOC_EXPORT " ")
 endif()
@@ -276,7 +273,6 @@ set(JEMALLOC_VALGRIND 0)
 
 # Support xmalloc option
 set(JEMALLOC_XMALLOC 0)
-
 if(enable-xmalloc)
   set(JEMALLOC_XMALLOC 1)
 endif()
@@ -285,7 +281,6 @@ endif()
 # If defined, explicitly attempt to more uniformly distribute large allocation
 # pointer alignments across all cache indices.
 set(JEMALLOC_CACHE_OBLIVIOUS 1)
-
 if(disable-cache-oblivious)
   set(JEMALLOC_CACHE_OBLIVIOUS 0)
 endif()
