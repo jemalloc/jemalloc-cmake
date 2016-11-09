@@ -764,3 +764,59 @@ message(STATUS "System pages size ${RUN_OUTPUT}")
 set(${OUTPUT_VAR_NAME} ${RUN_OUTPUT} PARENT_SCOPE)
 
 endfunction (GetSystemPageSize)
+
+######################################################
+## This function attemps to compile a one liner
+# with compiler flags to append. If the compiler flags
+# are supported they are appended to the variable which names
+# is supplied in the APPEND_TO_VAR and the RESULT_VAR is set to
+# True, otherwise to False
+function(JeCflagsAppend cflags APPEND_TO_VAR RESULT_VAR)
+
+  # Combine the result to try
+  set(TFLAGS "${${APPEND_TO_VAR}} ${cflags}")
+  CHECK_C_COMPILER_FLAG(${TFLAGS} status)
+ 
+  if(status)
+    set(${APPEND_TO_VAR} "${TFLAGS}" PARENT_SCOPE)
+    set(${RESULT_VAR} True PARENT_SCOPE)
+    message(STATUS "Checking whether compiler supports ${cflags} ... yes")
+  else()
+    set(${RESULT_VAR} False PARENT_SCOPE)
+    message(STATUS "Checking whether compiler supports ${cflags} ... no")
+  endif()
+
+endfunction(JeCflagsAppend)
+
+#############################################
+# JeCompilable checks if the code supplied in the hcode
+# is compilable 
+# label - part of the message
+# hcode - code prolog such as definitions
+# mcode - body of the main() function
+#
+# It sets rvar to yes or now depending on the result
+#
+# TODO: Make sure that it does expose linking problems
+function (JeCompilable label hcode mcode rvar)
+
+set(SRC 
+ "${hcode}
+  
+  int main(int argc, char* argv[]) {
+    ${mcode}
+    return 0;
+  }")
+
+  # We may want a stronger check here
+  CHECK_C_SOURCE_COMPILES("${SRC}" status)
+  
+  if(status)
+    set(${rvar} True PARENT_SCOPE)
+    message(STATUS "whether ${label} is compilable ... yes")
+  else()
+    set(${rvar} False PARENT_SCOPE)
+    message(STATUS "whether ${label} is compilable ... no")
+  endif()
+ 
+endfunction(JeCompilable)

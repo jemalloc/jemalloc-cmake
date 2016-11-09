@@ -55,16 +55,132 @@ option(disable-cache-oblivious "Disable uniform distribution of large allocation
 #  with-lg_size-class-group=<Base 2 log of size classes per doubling> default 2
 option(enable-lazy-lock "Enable lazy locking (only lock when multi-threaded" OFF)
 option(force_lazy_lock "Forcing lazy-lock to avoid allocator/threading bootstrap issues" OFF)
+# install_prefix - installation directory prefix
+# with-xslroot=<path>  XSL stylesheet root path
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
 
 include (CheckTypeSize)
 include (CheckIncludeFiles)
+include(TestBigEndian)
 include (CheckCSourceCompiles)
 include (CTest)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/Utilities.cmake)
+include(${CMAKE_SOURCE_DIR}/Utilities.cmake)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/build-aux")
+
+# TODO: Check the need for CONFIG
+
+# Set library revision
+set(rev 2)
+
+# Installation
+# Munge install path variables.
+# All of these can simply we be passed as
+# Cmake arguments
+if (NOT install_prefix)
+  set(install_prefix "/usr/local")
+endif()
+
+if(NOT exec_prefix)
+  set(exec_prefix $install_prefix)
+endif()
+
+set(PREFIX $install_prefix)
+
+# Support for building documentation.
+# find_package(xsltproc)
+# if(XSLTPROC_FOUND)
+  # set(XSLTPROC ${XSLTPROC_EXECUTABLE})
+# endif()
+
+if(EXISTS "/usr/share/xml/docbook/stylesheet/docbook-xsl")
+  set(DEFAULT_XSLROOT "/usr/share/xml/docbook/stylesheet/docbook-xsl")
+elseif(EXISTS "/usr/share/sgml/docbook/xsl-stylesheets")
+  set(DEFAULT_XSLROOT "/usr/share/sgml/docbook/xsl-stylesheets")
+else()
+  # Documentation building will fail if this default gets used.
+  set(DEFAULT_XSLROOT "")
+endif()
+
+if(with_xslroot)
+  set(XSLROOT "${with_xslroot}")
+else()
+  set(XSLROOT "${DEFAULT_XSLROOT}")
+endif()
+
+# Cmake will always have some CFLAGS set based on the compiler detection
+# Until we discover it is not what we want
+set(je_cv_cray_prgenv_wrapper False)
+
+if(ENV${PE_ENV})
+  # TODO: Check if MATCHES is OK with this syntax
+  if(ENV${PE_ENV} MATCHES "CC|cc")
+    set(je_cv_cray_prgenv_wrapper True)
+  endif()
+endif()
+
+message(STATUS "CMAKE_C_COMPILER_ID: ${CMAKE_C_COMPILER_ID}")
+
+# Whether cray compiler version is 8.4
+set(je_cv_cray_84 False)
+if(CMAKE_C_COMPILER_ID STREQUAL "Cray")
+  set(je_cv_cray True)
+  # If the version is defined then use it
+  if(CMAKE_C_COMPILER_VERSION)
+    set(VersionFound True)
+    set(VERSION_84 "8.4.0.0")
+    set(VERSION_85 "8.5.0.0")
+    if(VERSION_84 VERSION_EQUAL ${CMAKE_C_COMPILER_VERSION})
+      set(je_cv_cray_84 True)
+    elseif(VERSION_84 VERSION_LESS ${CMAKE_C_COMPILER_VERSION} AND
+           VERSION_85 VERSION_GREATER ${CMAKE_C_COMPILER_VERSION})
+      set(je_cv_cray_84 True)
+    endif()
+  endif()
+  # TODO: If the version is not defined then need to
+  # if(NOT VersionFound) COmpile and build the program
+endif()
+
+if(NOT CFLAGS)
+  if(CMAKE_COMPILER_IS_GNUCC)
+    JeCflagsAppend("-std=gnu11" "GFLAGS" "je_cv_cflags_appended")
+    if(je_cv_cflags_appended)
+      set (JEMALLOC_HAS_RESTRICT 1)
+    else()
+      JeCflagsAppend("-std=gnu99" "GFLAGS" "je_cv_cflags_appended")
+      if(je_cv_cflags_appended)
+        set (JEMALLOC_HAS_RESTRICT 1)
+      endif()
+    endif()
+    
+    # The errors on these are not checked
+    set (GFLAGS "${GFLAGS} -Wall -Werror=declaration-after-statement "
+                "-Wshorten-64-to-32 -Wsign-compare -pipe -g3")
+  endif()
+  
+  if(MSVC)
+    # Restrict is #defined to _restrict
+    set (JEMALLOC_HAS_RESTRICT 1)
+    # The rest of MSVC flags are down below
+  endif()
+  
+  if(je_cv_cray)
+    # cray compiler 8.4 has an inlining bug
+    if(je_cv_cray_84)
+      set (GFLAGS "${GFLAGS} -hipa2 -hnognu")
+    endif(je_cv_cray_84)
+    
+   if(enable_cc_silence)
+      # ignore unreachable code warning
+      set (GFLAGS "${GFLAGS} -hnomessage=128")
+      # ignore redefinition of "malloc", "free", etc warning
+      set (GFLAGS "${GFLAGS} -hnomessage=1357")
+   endif(enable_cc_silence)
+ endif(je_cv_cray)
+endif()
 
 ##################################################################
 # Versioning from GIT
@@ -96,11 +212,13 @@ CHECK_INCLUDE_FILES (inttypes.h HAVE_INTTYPES_H)
 CHECK_INCLUDE_FILES (stdatomic.h JEMALLOC_C11ATOMICS)
 CHECK_INCLUDE_FILES (sys/time.h HAVE_SYSTIME_H)
 
+TEST_BIG_ENDIAN(JEMALLOC_BIG_ENDIAN)
+
 UtilCheckTypeSize(void* SIZEOF_VOID_P)
 if(SIZEOF_VOID_P)
   lg(${SIZEOF_VOID_P} "LG_SIZEOF_PTR")
-  # The latest hardcodes Windows effetively disabling customization
-  set(LG_SIZEOF_PTR_WIN ${LG_SIZEOF_PTR})
+  # The latest code hardcodes this on Windows
+  # set(LG_SIZEOF_PTR_WIN ${LG_SIZEOF_PTR})
   if((NOT ${LG_SIZEOF_PTR} EQUAL 3) AND
      (NOT ${LG_SIZEOF_PTR} EQUAL 2))
     message(FATAL_ERROR "Unsupported pointer size :${LG_SIZEOF_PTR}")
@@ -144,7 +262,31 @@ if(SIZEOF_INTMAX_T)
   endif()
 endif()
 
-set (CPU_SPINWAIT "YieldProcessor()")
+# CPU-specific settings.
+message(STATUS "CMAKE_SYSTEM_NAME: ${CMAKE_SYSTEM_NAME}")
+
+if(MSVC)
+  JeCompilable("pause instruction MSVC" "" "_mm_pause();" je_cv_pause_msvc)
+  if(je_cv_pause_msvc)
+    set(CPU_SPINWAIT "_mm_pause()")
+  else()
+    JeCompilable("YieldProcessor() MSVC" "#include <Windows.h>" "YieldProcessor();" je_cv_pause_msvc)
+    if(je_cv_pause_msvc)
+      set (CPU_SPINWAIT "YieldProcessor()")
+    endif()
+  endif()
+elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "i686" OR
+   CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64")
+  JeCompilable("pause instruction" "" "__asm__ volatile(\"pause\");" je_cv_pause)
+  if(je_cv_pause)
+    set( CPU_SPINWAIT "__asm__ volatile(\"pause\")")
+  endif()
+endif()
+
+if(CMAKE_SYSTEM_NAME MATCHES "powerpc")
+  set(HAVE_ALTIVEC 1)
+endif()
+
 
 # If defined, use munmap() to unmap freed chunks, rather than storing them for
 # later reuse.  This is disabled by default on Linux because common sequences
@@ -338,7 +480,7 @@ endif()
 if(NOT WIN32)
 # Check if syscall(2) is usable.  Treat warnings as errors, so that e.g. OS X
 # 10.12's deprecation warning prevents use.
-  # set(CMAKE_REQUIRED_FLAGS  "${CMAKE_C_FLAGS} -Werror")
+  set(CMAKE_REQUIRED_FLAGS  "${CMAKE_C_FLAGS} -Werror")
   CHECK_C_SOURCE_COMPILES("
     #include <sys/syscall.h>
     #include <unistd.h>
@@ -418,8 +560,6 @@ set(JEMALLOC_PROF 0)
 set(JEMALLOC_PROF_LIBUNWIND 0)
 set(JEMALLOC_PROF_LIBGCC 0)
 set(JEMALLOC_PROF_GCC 0)
-
-set (JEMALLOC_HAS_RESTRICT 1)
 
 ###########################################################################
 # Generate configured public headers for concatenation
