@@ -46,9 +46,29 @@ endfunction(lg)
 # Thankfully, no floating point calcs
 #
 # Defined upon return:
-# - lg_delta_lookup (${lg_delta} or "no")
+# - psz ("yes" or "no")
 # - bin ("yes" or "no")
+# - lg_delta_lookup (${lg_delta} or "no")
 function(size_class index lg_grp lg_delta ndelta lg_p lg_g lg_kmax output_file)
+
+  if(${lg_delta} GREATER ${lg_p})
+    set(psz "yes")
+  else()
+    pow2(${lg_p} "p")
+    pow2(${lg_grp} "grp")
+    pow2(${lg_delta} "delta")
+    
+    math(EXPR sz "${grp} + ${delta} * ${ndelta}")
+    math(EXPR npgs "${sz} / ${p}")
+
+    # Check if the integer division above had a rem
+    math(EXPR product "${npgs} * ${p}")
+    if(${sz} EQUAL ${product})
+      set(psz "yes")
+    else()
+      set(psz "no")
+    endif()
+  endif()
 
   lg( ${ndelta} "lg_ndelta") 
   pow2(${lg_ndelta} "pow2_result")
@@ -88,18 +108,20 @@ function(size_class index lg_grp lg_delta ndelta lg_p lg_g lg_kmax output_file)
   
   ## TODO: Formatted output maybe necessary
   file (APPEND "${output_file}"
-    "    SC(  ${index}, ${lg_grp},  ${lg_delta},  ${ndelta}, ${bin},  ${lg_delta_lookup}) \\\n"
+    "    SC(  ${index}, ${lg_grp},  ${lg_delta},  ${ndelta}, ${psz}, ${bin}, ${lg_delta_lookup}) \\\n"
     )
   
   # Defined upon return:
-  # - lg_delta_lookup (${lg_delta} or "no")
+  # - psz ("yes" or "no")
   # - bin ("yes" or "no")
+  # - lg_delta_lookup (${lg_delta} or "no")
   
   # Promote to PARENT_SCOPE
-  set(lg_delta_lookup ${lg_delta_lookup} PARENT_SCOPE)
+  set(psz ${psz} PARENT_SCOPE)
   set(bin ${bin} PARENT_SCOPE)
+  set(lg_delta_lookup ${lg_delta_lookup} PARENT_SCOPE)
   
-  # message(STATUS "size_class_result: lg_delta_lookup: ${lg_delta_lookup} bin: ${bin}")
+  # message(STATUS "size_class_result: psz: ${psz} bin: ${bin} lg_delta_lookup: ${lg_delta_lookup}")
 endfunction(size_class)
 
 ####################################################################
@@ -111,6 +133,7 @@ endfunction(size_class)
 # - nlbins
 # - nbins
 # - nsizes
+# - npsizes
 # - lg_tiny_maxclass
 # - lookup_maxclass
 # - small_maxclass
@@ -124,13 +147,14 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
 
   file(APPEND "${output_file}"
     "#define	SIZE_CLASSES \\\n"
-    "  /* index, lg_grp, lg_delta, ndelta, bin, lg_delta_lookup */ \\\n"
+    "  /* index, lg_grp, lg_delta, ndelta, psz, bin, lg_delta_lookup */ \\\n"
   )
 
   set(ntbins 0)
   set(nlbins 0)
   set(lg_tiny_maxclass "\"NA\"")
   set(nbins 0)
+  set(npsizes 0)
 
   # Tiny size classes.
   set(ndelta 0)
@@ -146,6 +170,9 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
     
     if(NOT "${lg_delta_lookup}" STREQUAL "no")
       math(EXPR nlbins "${index} + 1")
+    endif()
+    if(${psz} STREQUAL "yes")
+      math(EXPR npsizes "${npsizes} + 1")
     endif()
     if(NOT "${bin}" STREQUAL "no")
       math(EXPR nbins "${index} + 1")
@@ -171,12 +198,18 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
     math(EXPR index "${index} + 1")
     math(EXPR lg_grp "${lg_grp} + 1")
     math(EXPR lg_delta "${lg_delta} + 1")
+    if(${psz} STREQUAL "yes")
+      math(EXPR npsizes "${npsizes} + 1")
+    endif()
   endif()
   
   while (${ndelta} LESS ${g})
     size_class( ${index} ${lg_grp} ${lg_delta} ${ndelta} ${lg_p} ${lg_g} ${lg_kmax} "${output_file}")
     math(EXPR index "${index} + 1")
     math(EXPR ndelta "${ndelta} + 1")
+    if(${psz} STREQUAL "yes")
+      math(EXPR npsizes "${npsizes} + 1")
+    endif()
   endwhile (${ndelta} LESS ${g})
 
   # All remaining groups.
@@ -205,7 +238,9 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
         # Final written value is correct:
         set(lookup_maxclass "((((size_t)1) << ${lg_grp}) + (((size_t)${ndelta}) << ${lg_delta}))")
       endif()
-      
+      if(${psz} STREQUAL "yes")
+        math(EXPR npsizes "${npsizes} + 1")
+      endif()
       if(NOT "${bin}" STREQUAL "no")
         math(EXPR nbins "${index} + 1")
         # # Final written value is correct:
@@ -234,6 +269,7 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
   # - nlbins
   # - nbins
   # - nsizes
+  # - npsizes  
   # - lg_tiny_maxclass
   # - lookup_maxclass
   # - small_maxclass
@@ -245,6 +281,7 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
   set(nlbins ${nlbins} PARENT_SCOPE)
   set(nbins ${nbins} PARENT_SCOPE)
   set(nsizes ${nsizes} PARENT_SCOPE)
+  set(npsizes ${npsizes} PARENT_SCOPE)
   set(lg_tiny_maxclass ${lg_tiny_maxclass} PARENT_SCOPE)
   set(lookup_maxclass ${lookup_maxclass} PARENT_SCOPE)
   set(small_maxclass ${small_maxclass} PARENT_SCOPE)
@@ -255,11 +292,12 @@ function(size_classes lg_z lg_q lg_t lg_p lg_g output_file)
           # "nlbins ${nlbins} "
           # "nbins ${nbins} "
           # "nsizes ${nsizes} "
+          # "npsizes ${npsizes} "
           # "lg_tiny_maxclass ${lg_tiny_maxclass} "
           # "lookup_maxclass ${lookup_maxclass} "
           # "small_maxclass ${small_maxclass} "
           # "lg_large_minclass ${lg_large_minclass} "
-          # "huge_maxclass ${huge_maxclass}"
+          # "large_maxclass ${huge_maxclass}"
           # )
 
 endfunction(size_classes)
@@ -296,12 +334,13 @@ file(WRITE "${output_file}"
 " *\n"
 " *   LG_SIZE_CLASS_GROUP: Lg of size class count for each size doubling.\n"
 " *   SIZE_CLASSES: Complete table of\n"
-" *                 SC(index, lg_grp, lg_delta, ndelta, bin, lg_delta_lookup)\n"
+" *                 SC(index, lg_grp, lg_delta, ndelta, psz, bin, lg_delta_lookup)\n"
 " *                 tuples.\n"
 " *     index: Size class index.\n"
 " *     lg_grp: Lg group base size (no deltas added).\n"
 " *     lg_delta: Lg delta to previous size class.\n"
 " *     ndelta: Delta multiplier.  size == 1<<lg_grp + ndelta<<lg_delta\n"
+" *     psz: 'yes' if a multiple of the page size, 'no' otherwise.\n"
 " *     bin: 'yes' if a small bin size class, 'no' otherwise.\n"
 " *     lg_delta_lookup: Same as lg_delta if a lookup table size class, 'no'\n"
 " *                      otherwise.\n"
@@ -309,6 +348,7 @@ file(WRITE "${output_file}"
 " *   NLBINS: Number of bins supported by the lookup table.\n"
 " *   NBINS: Number of small size class bins.\n"
 " *   NSIZES: Number of size classes.\n"
+" *   NPSIZES: Number of size classes that are a multiple of (1U << LG_PAGE).\n"
 " *   LG_TINY_MAXCLASS: Lg of maximum tiny size class.\n"
 " *   LOOKUP_MAXCLASS: Maximum size class included in lookup table.\n"
 " *   SMALL_MAXCLASS: Maximum small size class.\n"
@@ -334,6 +374,7 @@ foreach(lg_z ${lg_zarr})
           "#define	NLBINS			${nlbins}\n"
           "#define	NBINS			${nbins}\n"
           "#define	NSIZES			${nsizes}\n"
+          "#define	NPSIZES			${npsizes}\n"
           "#define	LG_TINY_MAXCLASS	${lg_tiny_maxclass}\n"
           "#define	LOOKUP_MAXCLASS		${lookup_maxclass}\n"
           "#define	SMALL_MAXCLASS		${small_maxclass}\n"
@@ -689,10 +730,15 @@ file(WRITE ${SRC}
 "#include <windows.h>\n"
 "#include <stdio.h>\n"
 "int main(int argc, const char** argv) {\n"
+"int result;\n"
+"#ifdef _WIN32\n"
 "SYSTEM_INFO si;\n"
 "GetSystemInfo(&si);\n"
-"DWORD result = si.dwPageSize;\n"
-"printf(\"%lu\", result);\n"
+"result = si.dwPageSize;\n"
+"#else\n"
+"result = sysconf(_SC_PAGESIZE);\n"
+"#endif\n"
+"printf(\"%d\", result);\n"
 "return 0;\n"
 "}\n"
 )
@@ -718,3 +764,59 @@ message(STATUS "System pages size ${RUN_OUTPUT}")
 set(${OUTPUT_VAR_NAME} ${RUN_OUTPUT} PARENT_SCOPE)
 
 endfunction (GetSystemPageSize)
+
+######################################################
+## This function attemps to compile a one liner
+# with compiler flags to append. If the compiler flags
+# are supported they are appended to the variable which names
+# is supplied in the APPEND_TO_VAR and the RESULT_VAR is set to
+# True, otherwise to False
+function(JeCflagsAppend cflags APPEND_TO_VAR RESULT_VAR)
+
+  # Combine the result to try
+  set(TFLAGS "${${APPEND_TO_VAR}} ${cflags}")
+  CHECK_C_COMPILER_FLAG(${TFLAGS} status)
+ 
+  if(status)
+    set(${APPEND_TO_VAR} "${TFLAGS}" PARENT_SCOPE)
+    set(${RESULT_VAR} True PARENT_SCOPE)
+    message(STATUS "Checking whether compiler supports ${cflags} ... yes")
+  else()
+    set(${RESULT_VAR} False PARENT_SCOPE)
+    message(STATUS "Checking whether compiler supports ${cflags} ... no")
+  endif()
+
+endfunction(JeCflagsAppend)
+
+#############################################
+# JeCompilable checks if the code supplied in the hcode
+# is compilable 
+# label - part of the message
+# hcode - code prolog such as definitions
+# mcode - body of the main() function
+#
+# It sets rvar to yes or now depending on the result
+#
+# TODO: Make sure that it does expose linking problems
+function (JeCompilable label hcode mcode rvar)
+
+set(SRC 
+ "${hcode}
+  
+  int main(int argc, char* argv[]) {
+    ${mcode}
+    return 0;
+  }")
+
+  # We may want a stronger check here
+  CHECK_C_SOURCE_COMPILES("${SRC}" status)
+  
+  if(status)
+    set(${rvar} True PARENT_SCOPE)
+    message(STATUS "whether ${label} is compilable ... yes")
+  else()
+    set(${rvar} False PARENT_SCOPE)
+    message(STATUS "whether ${label} is compilable ... no")
+  endif()
+ 
+endfunction(JeCompilable)

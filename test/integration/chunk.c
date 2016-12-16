@@ -1,9 +1,5 @@
 #include "test/jemalloc_test.h"
 
-#ifdef JEMALLOC_FILL
-const char *malloc_conf = "junk:false";
-#endif
-
 static chunk_hooks_t orig_hooks;
 static chunk_hooks_t old_hooks;
 
@@ -288,6 +284,8 @@ TEST_END
 int
 main(void)
 {
-
+#ifdef JEMALLOC_FILL
+  malloc_conf = "junk:false";
+#endif
 	return (test(test_chunk));
 }
