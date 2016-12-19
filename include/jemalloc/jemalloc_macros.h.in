@@ -48,6 +48,8 @@
 #    else
 #      define JEMALLOC_EXPORT __declspec(dllimport)
 #    endif
+#  else
+#    define JEMALLOC_EXPORT 
 #  endif
 #  define JEMALLOC_FORMAT_PRINTF(s, i)
 #  define JEMALLOC_NOINLINE __declspec(noinline)
