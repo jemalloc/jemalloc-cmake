@@ -491,6 +491,7 @@ if(NOT WIN32)
     set(JEMALLOC_HAVE_SYSCALL 1)
   endif()
 
+  include(CheckFunctionExists)
   CHECK_FUNCTION_EXISTS(secure_getenv HAVE_SECURE_GETENV)
   if(HAVE_SECURE_GETENV)
     set(JEMALLOC_HAVE_SECURE_GETENV 1)
