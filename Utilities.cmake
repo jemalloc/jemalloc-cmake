@@ -641,7 +641,6 @@ if(EXISTS ${file_path})
     file(WRITE "${CMAKE_BINARY_DIR}/${ntv_file_relative_path}" "${NTV_FILE_CONTENT}")
 
     configure_file(${CMAKE_BINARY_DIR}/${ntv_file_relative_path} ${output_path} @ONLY NEWLINE_STYLE WIN32)
-    configure_file(${file_path}.cmake ${output_path} @ONLY NEWLINE_STYLE WIN32)
     file(REMOVE ${file_path}.cmake)
   endif()
   include_directories("${CMAKE_SOURCE_DIR}/include")
@@ -716,25 +715,34 @@ set(SRC "${WORK_FOLDER}/getpagesize.c")
 set(COMPILE_OUTPUT_FILE "${WORK_FOLDER}/getpagesize.log")
 
 file(WRITE ${SRC}
+"#include <stdio.h>\n"
 "#ifdef _WIN32\n"
 "#include <windows.h>\n"
-"#include <stdio.h>\n"
+"#elif defined(__APPLE__)\n"
+"#include <sys/param.h>\n"
+"#include <sys/sysctl.h>\n"
 "#else\n"
 "#include <unistd.h>\n"
 "#endif\n"
 "int main(int argc, const char** argv) {\n"
 "#ifdef _WIN32\n"
 "int result;\n"
-"#ifdef _WIN32\n"
 "SYSTEM_INFO si;\n"
 "GetSystemInfo(&si);\n"
 "result = si.dwPageSize;\n"
-"#else\n"
-"result = sysconf(_SC_PAGESIZE);\n"
-"#endif\n"
 "printf(\"%d\", result);\n"
+"#elif defined(__APPLE__)\n"
+"int mib[2], value, pagesize;\n"
+"size_t size;\n"
+"mib[0] = CTL_HW;\n"
+"mib[1] = HW_PAGESIZE;\n"
+"size = sizeof value;\n"
+"if (sysctl(mib, 2, &value, &size, NULL, 0) == -1)\n"
+"    pagesize = -1;\n"
+"pagesize = value;\n"
+"printf(\"%d\", pagesize);\n"
 "#else\n"
-"printf(\"page size = %d\\n\", getpagesize());\n"
+"printf(\"%d\", getpagesize());\n"
 "#endif\n"
 "return 0;\n"
 "}\n"

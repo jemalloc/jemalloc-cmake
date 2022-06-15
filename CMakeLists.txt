@@ -57,6 +57,7 @@ option(enable-lazy-lock "Enable lazy locking (only lock when multi-threaded" OFF
 option(force_lazy_lock "Forcing lazy-lock to avoid allocator/threading bootstrap issues" OFF)
 # install_prefix - installation directory prefix
 # with-xslroot=<path>  XSL stylesheet root path
+option(disable-zone-allocator "Disable zone allocator for Darwin" ON)
 
 set (PACKAGE_NAME "jemalloc")
 project (${PACKAGE_NAME} C)
@@ -204,7 +205,7 @@ set(abi "elf")
 
 # Whether malloc_usable_size definition can use const argument
 CHECK_INCLUDE_FILES (malloc.h HAVE_MALLOC_H)
-if(HAVE_MALLOC_H)
+if(HAVE_MALLOC_H OR APPLE)
     set(JEMALLOC_USABLE_SIZE_CONST const)
 endif()    
 
@@ -702,7 +703,7 @@ set(C_SRCS
   src/witness.c
 )
 
-if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
+if(CMAKE_SYSTEM_NAME MATCHES "Darwin" AND NOT disable-zone-allocator)
   list(APPEND C_SRCS src/zone.c)
 endif()
 
