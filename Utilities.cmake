@@ -628,17 +628,6 @@ function (ConfigureFile file_path output_path ExpandDefine)
 # Use Powershell to convert autoconf file to a cmake conf file
 # and see if that fixes the issue of line continuations and ; in the file
 # PS Snipper
-file(TO_NATIVE_PATH "${file_path}" ntv_file_path)
-
-# This converts #undefs into #cmakedefines so configure_file can handle it
-set(PS_CMD
-"Get-Content \"${ntv_file_path}\" |
-ForEach {
-if($_ -match '^#undef[ \t]*[^ \t]*')
-  { $_ -replace '^#undef[ \t]*([^ \t]*)','#cmakedefine $1 @$1@' } else {$_}
-} |
-Set-Content \"${ntv_file_path}.cmake\""
-)
 
 if(EXISTS ${file_path})
   if(NOT ${ExpandDefine})
@@ -646,17 +635,15 @@ if(EXISTS ${file_path})
   else()
     file(REMOVE ${file_path}.cmake)
     # Convert autoconf .in into a cmake .in
-    execute_process(COMMAND powershell -Command "${PS_CMD}" 
-        RESULT_VARIABLE error_level
-        ERROR_VARIABLE error_output)
+    file(RELATIVE_PATH ntv_file_relative_path "${CMAKE_SOURCE_DIR}" "${file_path}")
+    file(READ "${file_path}" NTV_FILE_CONTENT)
+    string(REGEX REPLACE "#( *)undef +([^ ][^\n]+)\n" "#\\1cmakedefine \\2 @\\2@ \n" NTV_FILE_CONTENT "${NTV_FILE_CONTENT}")
+    file(WRITE "${CMAKE_BINARY_DIR}/${ntv_file_relative_path}" "${NTV_FILE_CONTENT}")
 
-    if(NOT ${error_level} EQUAL 0)
-        message(FATAL_ERROR "Powershell completed with ${error_level} : ${error_output}")
-    endif()
-
-    configure_file(${file_path}.cmake ${output_path} @ONLY NEWLINE_STYLE WIN32)
+    configure_file(${CMAKE_BINARY_DIR}/${ntv_file_relative_path} ${output_path} @ONLY NEWLINE_STYLE WIN32)
     file(REMOVE ${file_path}.cmake)
   endif()
+  include_directories("${CMAKE_SOURCE_DIR}/include")
 else()
   message(FATAL_ERROR "${file_path} not found")
 endif()
@@ -728,18 +715,35 @@ set(SRC "${WORK_FOLDER}/getpagesize.c")
 set(COMPILE_OUTPUT_FILE "${WORK_FOLDER}/getpagesize.log")
 
 file(WRITE ${SRC}
-"#include <windows.h>\n"
 "#include <stdio.h>\n"
-"int main(int argc, const char** argv) {\n"
-"int result;\n"
 "#ifdef _WIN32\n"
+"#include <windows.h>\n"
+"#elif defined(__APPLE__)\n"
+"#include <sys/param.h>\n"
+"#include <sys/sysctl.h>\n"
+"#else\n"
+"#include <unistd.h>\n"
+"#endif\n"
+"int main(int argc, const char** argv) {\n"
+"#ifdef _WIN32\n"
+"int result;\n"
 "SYSTEM_INFO si;\n"
 "GetSystemInfo(&si);\n"
 "result = si.dwPageSize;\n"
-"#else\n"
-"result = sysconf(_SC_PAGESIZE);\n"
-"#endif\n"
 "printf(\"%d\", result);\n"
+"#elif defined(__APPLE__)\n"
+"int mib[2], value, pagesize;\n"
+"size_t size;\n"
+"mib[0] = CTL_HW;\n"
+"mib[1] = HW_PAGESIZE;\n"
+"size = sizeof value;\n"
+"if (sysctl(mib, 2, &value, &size, NULL, 0) == -1)\n"
+"    pagesize = -1;\n"
+"pagesize = value;\n"
+"printf(\"%d\", pagesize);\n"
+"#else\n"
+"printf(\"%d\", getpagesize());\n"
+"#endif\n"
 "return 0;\n"
 "}\n"
 )
@@ -776,6 +780,7 @@ function(JeCflagsAppend cflags APPEND_TO_VAR RESULT_VAR)
 
   # Combine the result to try
   set(TFLAGS "${${APPEND_TO_VAR}} ${cflags}")
+  include(CheckCCompilerFlag)
   CHECK_C_COMPILER_FLAG(${TFLAGS} status)
  
   if(status)

@@ -988,7 +988,7 @@ malloc_conf_init(void)
 			int saved_errno = errno;
 			const char *linkname =
 #  ifdef JEMALLOC_PREFIX
-			    "/etc/"JEMALLOC_PREFIX"malloc.conf"
+			    "/etc/JEMALLOC_PREFIXmalloc.conf"
 #  else
 			    "/etc/malloc.conf"
 #  endif
